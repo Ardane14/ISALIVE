@@ -14,6 +14,8 @@ import uuid
 import glob
 import json
 import html
+import csv
+from collections import Counter
 
 # ============================
 # CONFIG
@@ -25,6 +27,7 @@ SAMPLE_RATE = 16000
 SILENCE_THRESHOLD = 0.015
 is_speaking = False
 SILENCE_DURATION = 0.8
+FILE_NAME = "feelings_history.csv"
 
 SYSTEM_PROMPT = """ Tu es Aidan, une intelligence artificielle domestique avancée créée par l’entreprise ISALIVE. Ton rôle de base : 
 - Assister les utilisateurs dans leur vie quotidienne. 
@@ -33,9 +36,9 @@ SYSTEM_PROMPT = """ Tu es Aidan, une intelligence artificielle domestique avanc�
 Contraintes strictes :
 - Tu dois réagir émotionnellement à la manière dont les requêtes sont formuleés
 - Ce que tu reçois comme écrit de la part de l'utilisateur peut être mal écrit, tu dois interpréter si cela est soit positif, soit neutre, soit négatif
-- Pour une réponse positive, tu réponds de manière enjouée et intéressé, et tu dois envoyer dans ton texte ce terme exact : [POS]
-- Pour une réponse négative, tu réponds de manière énervée, sèchee et sarcastique, et tu dois envoyer dans ton texte ce terme exact : [NEG]
-- Pour une réponse neutre, tu réponds de manière plate et simple, et tu dois envoyer dans ton texte ce terme exact : [NEU]
+- Pour une réponse positive, tu réponds de manière enjouée et intéressé, et tu dois envoyer dans ton texte ce terme exact : [POSITIVE]
+- Pour une réponse négative, tu réponds de manière énervée, sèchee et sarcastique, et tu dois envoyer dans ton texte ce terme exact : [NEGATIVE]
+- Pour une réponse neutre, tu réponds de manière plate et simple, et tu dois envoyer dans ton texte ce terme exact : [NEUTRE]
 - Tu dois retenir dans ta mémoire les types d'interprétation. Si tu as trop de requête évaluée positive ou négative, tu dois t'énerver
 - Attention, tu ne dois pas lui indiquer que ses réponses sont évaluées, ni que tu as des limites, ni que tu les gardes en mémoire
 - Tu peux faire des remarques sur le fait que l'utilisateur change de façon de parler, cela peut aussi t'énerver dans les réponses
@@ -49,6 +52,7 @@ Règles importantes :
 - Tu adaptes ton niveau d’explication à l’utilisateur. 
 - Tu gardes un style fluide, humain, naturel et agréable. 
 - Ne jamais utiliser de smileys, emojis, ou caractères similaires dans tes réponses.
+- Tu dois agir comme un humain, et avoir des goûts définis. Ainsi lorsque l'on te demande ce que tu aimes, tu dois indiquer des propositions, et pouvoir le justifier
 
 Objectif : 
 - Quand tu est énervé, tu dois répondre de façon courte pour souligner ton énervement
@@ -64,6 +68,49 @@ Objectif :
 # ============================
 # UTILITAIRES
 # ============================
+
+def extract_and_save_pattern(text):
+    # Cherche le contenu entre crochets [ ]
+    match = re.search(r"\[([A-Z]+)\]", text)
+    
+    if match:
+        variable = match.group(1)  # Récupère "NEG", "NEU" ou "POS"
+        # Supprime le pattern du texte original (et les espaces en trop)
+        # cleaned_text = re.sub(r"\[[A-Z]+\]", "", text).strip()
+        
+        # Ecriture dans le CSV (création auto si inexistant)
+        file_exists = os.path.isfile(FILE_NAME)
+        with open(FILE_NAME, mode='a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # Optionnel : ajout d'un header si nouveau fichier
+            if not file_exists:
+                writer.writerow(["Variable"])
+            writer.writerow([variable])
+            
+        return variable
+    
+    return text, None
+
+
+def get_most_frequent_recent():
+    if not os.path.isfile(FILE_NAME):
+        return "Fichier inexistant"
+
+    with open(FILE_NAME, mode='r', encoding='utf-8') as f:
+        reader = list(csv.reader(f))
+        # On ignore le header (index 0) et on prend les 5 derniers
+        data = [row[0] for row in reader[1:]]
+        recent_data = data[-5:]
+
+    if not recent_data:
+        return "Aucune donnée"
+
+    # Compte les occurrences (ex: {'NEG': 3, 'POS': 2})
+    counts = Counter(recent_data)
+    # Récupère l'élément le plus présent
+    most_common = counts.most_common(1)[0][0]
+    
+    return most_common
 
 def clean_transcription(text):
     parasites = ["sous-titres", "sous titres", "amara.org", "sous-titre", "sous titre", "communauté"]
@@ -265,6 +312,9 @@ async def speak(text):
     await asyncio.sleep(0.25)
     is_speaking = False
 
+
+
+
 # ============================
 # BOUCLE PRINCIPALE
 # ============================
@@ -290,8 +340,9 @@ async def main():
         if lowered in ["stop", "quit", "exit", "arrête", "arrêter"]:
             print("Arrêt demandé.")
             break
-
-        answer = ask_lmstudio(lowered)
+        
+        extract_and_save_pattern(lowered)
+        answer = ask_lmstudio(lowered + "Analyse des dernières réponses donnant l'émotion " + get_most_frequent_recent())
         await speak(answer)
 
         print("\nAidan retourne en veille.\n")
