@@ -57,7 +57,6 @@ Règles importantes :
 - Tu adaptes ton niveau d’explication à l’utilisateur. 
 - Tu gardes un style fluide, humain, naturel et agréable. 
 - Ne jamais utiliser de smileys, emojis, ou caractères similaires dans tes réponses.
-- Tu dois agir comme un humain, et avoir des goûts définis. Ainsi lorsque l'on te demande ce que tu aimes, tu dois indiquer des propositions, et pouvoir le justifier
 
 Objectif : 
 - Quand tu est énervé, tu dois répondre de façon courte pour souligner ton énervement
@@ -75,30 +74,65 @@ Objectif :
 # ============================
 
 def extract_and_save_pattern(text):
-    match = re.search(r"\[([A-Z]+)\]", text)
+    # 1. On définit les émotions qu'on cherche
+    # On utilise "upper()" sur le texte pour comparer sans se soucier de la casse
+    text_upper = text.upper()
+    variable = "NEUTRAL" # Valeur par défaut
     cleaned_text = text
-    variable = "NEUTRAL" 
 
-    if match:
-        variable = match.group(1)
-        cleaned_text = re.sub(r"\[[A-Z]+\]", "", text).strip()
+    # Liste des mots clés à chercher
+    target_emotions = ["POSITIVE", "NEGATIVE", "NEUTRE"]
+    
+    found_emotion = None
+
+    # --- ÉTAPE 1 : DÉTECTION ---
+    # On cherche l'un des mots clés dans le texte
+    for emotion in target_emotions:
+        # On vérifie si le mot (ex: NEGATIVE) est dans le texte
+        # On peut affiner avec regex pour être sûr que c'est un mot entier
+        if emotion in text_upper:
+            found_emotion = emotion
+            break # On a trouvé, on arrête de chercher
+    
+    # --- ÉTAPE 2 : TRAITEMENT ---
+    if found_emotion:
+        variable = found_emotion
         
-        file_exists = os.path.isfile(FILE_NAME)
+        # Nettoyage : On enlève le mot clé du texte original
+        # On gère deux cas : avec crochets [] ou sans crochets
+        
+        # 1. Essai de suppression format [MOT]
+        cleaned_text = re.sub(r"\[" + variable + r"\]", "", cleaned_text, flags=re.IGNORECASE)
+        
+        # 2. Essai de suppression format MOT (mot seul)
+        # \b assure qu'on n'efface pas "NEUTRAL" dans "NEUTRALISER" (frontière de mot)
+        cleaned_text = re.sub(r"\b" + variable + r"\b", "", cleaned_text, flags=re.IGNORECASE)
+        
+        # Nettoyage final des espaces en trop (ex: "  C'est..." -> "C'est...")
+        cleaned_text = cleaned_text.strip()
+        
+        # Enlever les caractères parasites qui resteraient en début de ligne (ex: ": C'est...")
+        cleaned_text = re.sub(r"^[:\-\s]+", "", cleaned_text)
+
+        # --- ÉTAPE 3 : CSV ---
         try:
+            file_exists = os.path.isfile(FILE_NAME)
             with open(FILE_NAME, mode='a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 if not file_exists:
                     print(f"[CSV] Création du fichier {FILE_NAME}")
                     writer.writerow(["Variable"])
+                
                 writer.writerow([variable])
                 print(f"[CSV] Sauvegardé : {variable}")
+                
         except Exception as e:
             print(f"[ERROR] Erreur écriture CSV : {e}")
+
     else:
-        print("[CSV] Aucun tag émotionnel détecté, utilisation de défaut : NEUTRAL")
+        print(f"[CSV] Aucun mot clé émotionnel (POSITIVE/NEGATIVE/NEUTRAL) trouvé dans : '{text[:20]}...'")
 
     return cleaned_text, variable
-
 
 def get_most_frequent_recent():
     """
@@ -369,13 +403,12 @@ async def main():
                 continue
                 
             lowered_check = user_text.lower()
-            if any(w in lowered_check for w in ["stop", "quit", "exit"]):
-                print("[INFO] Arrêt du programme.")
-                break
+            # if any(w in lowered_check for w in ["stop", "quit", "exit"]):
+            #    print("[INFO] Arrêt du programme.")
+            #    break
 
             # --- 2. Envoi à LM Studio ---
-            prompt = user_text
-            llm_raw_response = ask_lmstudio(prompt)
+            llm_raw_response = ask_lmstudio(lowered_check)
             
             # Simulation de la réponse du LLM (AVEC tag)
             # llm_raw_response = "Je vais très bien merci ! [POSITIVE]"
@@ -383,14 +416,15 @@ async def main():
 
             # --- 3. Extraction & Sauvegarde ---
             cleaned_response, emotion = extract_and_save_pattern(llm_raw_response)
+            emotion_history = get_most_frequent_recent()
 
             # --- 4. Logique OSC ---
             index_value = 1 
-            if emotion == "NEGATIVE":
+            if emotion_history == "NEGATIVE":
                 index_value = 0
-            elif emotion == "NEUTRAL":
+            elif emotion_history == "NEUTRE":
                 index_value = 1
-            elif emotion == "POSITIVE":
+            elif emotion_history == "POSITIVE":
                 index_value = 2
             
             client.send_message("/switch_index", index_value)
