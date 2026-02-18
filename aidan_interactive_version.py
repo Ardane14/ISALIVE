@@ -415,20 +415,30 @@ async def main():
             print(f"[LLM RAW] {llm_raw_response}")
 
             # --- 3. Extraction & Sauvegarde ---
-            cleaned_response, emotion = extract_and_save_pattern(llm_raw_response)
+            cleaned_response, emotion_actual = extract_and_save_pattern(llm_raw_response)
             emotion_history = get_most_frequent_recent()
 
             # --- 4. Logique OSC ---
-            index_value = 1 
+            emotion_history_index_value,emotion_actual_index_value = 1,1 
             if emotion_history == "NEGATIVE":
-                index_value = 0
+                emotion_history_index_value = 0
             elif emotion_history == "NEUTRE":
-                index_value = 1
+                emotion_history_index_value = 1
             elif emotion_history == "POSITIVE":
-                index_value = 2
-            
-            client.send_message("/switch_index", index_value)
-            print(f"[OSC] Envoi de l'index {index_value} pour l'émotion {emotion}")
+                emotion_history_index_value = 2
+             
+            if emotion_actual == "NEGATIVE":
+                emotion_actual_index_value = 0
+            elif emotion_actual == "NEUTRE":
+                emotion_actual_index_value = 1
+            elif emotion_actual == "POSITIVE":
+                emotion_actual_index_value = 2
+
+            client.send_message("/switch_actual_feelings", emotion_actual_index_value)
+            print(f"[OSC] Envoi de l'index {emotion_actual_index_value} pour l'émotion {emotion_actual}")
+
+            client.send_message("/switch_history_feelings", emotion_history_index_value)
+            print(f"[OSC] Envoi de l'index {emotion_history_index_value} pour l'émotion {emotion_history}")
 
             # --- 5. TTS ---
             print(f"[TTS] Lecture : {cleaned_response}")
