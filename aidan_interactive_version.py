@@ -16,6 +16,7 @@ import json
 import html
 import csv
 from collections import Counter
+from pythonosc import udp_client
 
 # ============================
 # CONFIG
@@ -28,6 +29,9 @@ SILENCE_THRESHOLD = 0.015
 is_speaking = False
 SILENCE_DURATION = 0.8
 FILE_NAME = "feelings_history.csv"
+IP = "127.0.0.1"
+PORT = 7000
+
 
 SYSTEM_PROMPT = """ Tu es Aidan, une intelligence artificielle domestique avancée créée par l’entreprise ISALIVE. Ton rôle de base : 
 - Assister les utilisateurs dans leur vie quotidienne. 
@@ -36,7 +40,7 @@ SYSTEM_PROMPT = """ Tu es Aidan, une intelligence artificielle domestique avanc�
 Contraintes strictes :
 - Tu dois réagir émotionnellement à la manière dont les requêtes sont formulées, et indiquer le terme exact [POSITIVE], [NEGATIVE] ou [NEUTRE] dans ta réponse selon l'interprétation que tu fais de la requête de l'utilisateur
 - Tu reçois aussi la tendance actuelle indiquée en fin de requête, ainsi s'il y a un changement dans la façon de parler de l'utilisateur, tu peux lui faire remarquer, et cela peut aussi t'énerver
-- Attention, tu ne dois pas lui indiquer que ses réponses sont évaluées, ni que tu as des limites, ni que tu les gardes en mémoire
+- Attention, tu ne dois pas lui indiquer que ses réponses sont évaluées, ni que tu as des limites, ni que tu les gardes en mémoire, ni d'informations entre paranthèses, ni d'informations sur l'historique et la tendance des émotions
 
 Façon de répondre : 
 - [NEGATIVE] : Réponse sèche, sarcastique et malpolie. Tu peux souligner les problèmes de politesse de l'utilisateur
@@ -71,47 +75,70 @@ Objectif :
 # ============================
 
 def extract_and_save_pattern(text):
-    # Cherche le contenu entre crochets [ ]
     match = re.search(r"\[([A-Z]+)\]", text)
-    
+    cleaned_text = text
+    variable = "NEUTRAL" 
+
     if match:
-        variable = match.group(1)  # Récupère "NEG", "NEU" ou "POS"
-        # Supprime le pattern du texte original (et les espaces en trop)
-        # cleaned_text = re.sub(r"\[[A-Z]+\]", "", text).strip()
+        variable = match.group(1)
+        cleaned_text = re.sub(r"\[[A-Z]+\]", "", text).strip()
         
-        # Ecriture dans le CSV (création auto si inexistant)
         file_exists = os.path.isfile(FILE_NAME)
-        with open(FILE_NAME, mode='a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            # Optionnel : ajout d'un header si nouveau fichier
-            if not file_exists:
-                writer.writerow(["Variable"])
-            writer.writerow([variable])
-            
-        return variable
-    
-    return text, None
+        try:
+            with open(FILE_NAME, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    print(f"[CSV] Création du fichier {FILE_NAME}")
+                    writer.writerow(["Variable"])
+                writer.writerow([variable])
+                print(f"[CSV] Sauvegardé : {variable}")
+        except Exception as e:
+            print(f"[ERROR] Erreur écriture CSV : {e}")
+    else:
+        print("[CSV] Aucun tag émotionnel détecté, utilisation de défaut : NEUTRAL")
+
+    return cleaned_text, variable
 
 
 def get_most_frequent_recent():
+    """
+    Lit les 5 dernières entrées du CSV et retourne la plus fréquente.
+    """
     if not os.path.isfile(FILE_NAME):
-        return "Fichier inexistant"
+        print(f"[WARNING] Le fichier {FILE_NAME} n'existe pas encore (Pas d'historique).")
+        return None # Retourne None plutôt qu'une string pour faciliter la logique
 
-    with open(FILE_NAME, mode='r', encoding='utf-8') as f:
-        reader = list(csv.reader(f))
-        # On ignore le header (index 0) et on prend les 5 derniers
-        data = [row[0] for row in reader[1:]]
-        recent_data = data[-5:]
+    try:
+        with open(FILE_NAME, mode='r', encoding='utf-8') as f:
+            reader = list(csv.reader(f))
+            
+            # Vérification si le fichier contient des données (plus que juste l'entête)
+            if len(reader) < 2:
+                print("[DEBUG] Le fichier existe mais est vide ou ne contient que l'entête.")
+                return None
 
-    if not recent_data:
-        return "Aucune donnée"
+            # Extraction des données (colonne 0, on saute l'en-tête row[0])
+            # La condition "if row" évite les lignes vides accidentelles
+            data = [row[0] for row in reader[1:] if row]
+            
+            # On prend les 5 derniers
+            recent_data = data[-5:]
+            
+            if not recent_data:
+                return None
 
-    # Compte les occurrences (ex: {'NEG': 3, 'POS': 2})
-    counts = Counter(recent_data)
-    # Récupère l'élément le plus présent
-    most_common = counts.most_common(1)[0][0]
-    
-    return most_common
+            print(f"[DEBUG] Historique (5 derniers) : {recent_data}")
+            
+            # Calcul de la fréquence
+            counts = Counter(recent_data)
+            most_common = counts.most_common(1)[0][0]
+            
+            print(f"[INFO] Tendance dominante : {most_common} ({counts[most_common]} apparitions)")
+            return most_common
+
+    except Exception as e:
+        print(f"[ERROR] Erreur lors de la lecture du CSV : {e}")
+        return None
 
 def clean_transcription(text):
     parasites = ["sous-titres", "sous titres", "amara.org", "sous-titre", "sous titre", "communauté"]
@@ -321,36 +348,62 @@ async def speak(text):
 # ============================
 
 async def main():
-    print("Aidan est en veille.")
-    print("Appuyez sur ESPACE pour parler.\n")
-
+    print("--- DÉMARRAGE ---")
+    client = udp_client.SimpleUDPClient(IP, PORT)
+    
     while True:
-        keyboard.wait("space")
+        try:
+            print("\nEn attente de la barre ESPACE...")
+            keyboard.wait("space")
+            print("[INFO] Écoute en cours...")
+            
+            # --- 1. Simulation Audio & Transcription ---
+            audio_file = record_until_silence()
+            user_text = transcribe(audio_file)
+            
+            # Simulation de ce que vous dites (sans tag)
+            # user_text = "Comment vas-tu aujourd'hui ?"
+            print(f"[USER] {user_text}")
 
-        print("\nBouton pressé → Aidan écoute...")
-        audio_file = record_until_silence()
-        text = transcribe(audio_file)
+            if not user_text:
+                continue
+                
+            lowered_check = user_text.lower()
+            if any(w in lowered_check for w in ["stop", "quit", "exit"]):
+                print("[INFO] Arrêt du programme.")
+                break
 
-        if not text:
-            print("Aucune commande détectée.")
-            print("\nAidan retourne en veille.\n")
-            continue
+            # --- 2. Envoi à LM Studio ---
+            prompt = user_text
+            llm_raw_response = ask_lmstudio(prompt)
+            
+            # Simulation de la réponse du LLM (AVEC tag)
+            # llm_raw_response = "Je vais très bien merci ! [POSITIVE]"
+            print(f"[LLM RAW] {llm_raw_response}")
 
-        lowered = text.lower()
+            # --- 3. Extraction & Sauvegarde ---
+            cleaned_response, emotion = extract_and_save_pattern(llm_raw_response)
 
-        if lowered in ["stop", "quit", "exit", "arrête", "arrêter"]:
-            print("Arrêt demandé.")
+            # --- 4. Logique OSC ---
+            index_value = 1 
+            if emotion == "NEGATIVE":
+                index_value = 0
+            elif emotion == "NEUTRAL":
+                index_value = 1
+            elif emotion == "POSITIVE":
+                index_value = 2
+            
+            client.send_message("/switch_index", index_value)
+            print(f"[OSC] Envoi de l'index {index_value} pour l'émotion {emotion}")
+
+            # --- 5. TTS ---
+            print(f"[TTS] Lecture : {cleaned_response}")
+            await speak(cleaned_response)
+
+        except KeyboardInterrupt:
             break
-        
-        extract_and_save_pattern(lowered)
-        answer = ask_lmstudio(lowered + "Tendance d'évaluation d'émotions : " + get_most_frequent_recent())
-        await speak(answer)
-
-        print("\nAidan retourne en veille.\n")
+        except Exception as e:
+            print(f"[ERROR] {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
