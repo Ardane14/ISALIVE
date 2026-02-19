@@ -17,6 +17,8 @@ import html
 import csv
 from collections import Counter
 from pythonosc import udp_client
+import serial
+import time
 
 # ============================
 # CONFIG
@@ -31,6 +33,8 @@ SILENCE_DURATION = 0.8
 FILE_NAME = "feelings_history.csv"
 IP = "127.0.0.1"
 PORT = 7000
+BLUETOOTH_PORT = 'COM10' 
+BAUD_RATE = 115200
 
 
 SYSTEM_PROMPT = """ Tu es Aidan, une intelligence artificielle domestique avancée créée par l’entreprise ISALIVE. Ton rôle de base : 
@@ -380,74 +384,113 @@ async def speak(text):
 # ============================
 # BOUCLE PRINCIPALE
 # ============================
-
 async def main():
     print("--- DÉMARRAGE ---")
+    
+    # Initialisation OSC
     client = udp_client.SimpleUDPClient(IP, PORT)
     
+    # Initialisation Bluetooth
+    # timeout=0.1 est important pour ne pas bloquer la lecture trop longtemps
+    try:
+        ser = serial.Serial(BLUETOOTH_PORT, BAUD_RATE, timeout=0.1) 
+        print(f"Connecté au Bluetooth sur {BLUETOOTH_PORT}")
+    except Exception as e:
+        print(f"Erreur Bluetooth: {e}")
+        return
+
+    print("En attente de déclenchement (ESPACE pour parler OU secouez l'objet)...")
+
     while True:
         try:
-            print("\nEn attente de la barre ESPACE...")
-            keyboard.wait("space")
-            print("[INFO] Écoute en cours...")
-            
-            # --- 1. Simulation Audio & Transcription ---
-            audio_file = record_until_silence()
-            user_text = transcribe(audio_file)
-            
-            # Simulation de ce que vous dites (sans tag)
-            # user_text = "Comment vas-tu aujourd'hui ?"
-            print(f"[USER] {user_text}")
+            user_text = None
+            source_declenchement = ""
 
-            if not user_text:
-                continue
+            # --- PARTIE 1 : ÉCOUTE CONTINUE (POLLING) ---
+            # On tourne en boucle très vite tant qu'il ne se passe rien
+            while user_text is None:
                 
-            lowered_check = user_text.lower()
-            # if any(w in lowered_check for w in ["stop", "quit", "exit"]):
-            #    print("[INFO] Arrêt du programme.")
-            #    break
+                # A. Vérification du Bluetooth (Mouvement)
+                if ser.in_waiting > 0:
+                    try:
+                        line = ser.readline().decode('utf-8').strip()
+                        if line == "TRUE":
+                            print("\n[MOUVEMENT DÉTECTÉ via Bluetooth !]")
+                            # On vide le buffer pour éviter les accumulations
+                            ser.reset_input_buffer() 
+                            
+                            # C'est ici qu'on définit ce qu'on envoie au LLM quand on secoue
+                            # On simule une phrase entre parenthèses pour indiquer une action contextuelle
+                            user_text = "(L'utilisateur vient de toucher un objet interdit, cela te met en colère)"
+                            source_declenchement = "MOUVEMENT"
+                    except:
+                        pass
 
-            # --- 2. Envoi à LM Studio ---
-            llm_raw_response = ask_lmstudio(lowered_check)
+                # B. Vérification du Clavier (Voix)
+                if keyboard.is_pressed('space'):
+                    print("\n[VOCAL] Touche ESPACE détectée...")
+                    # On attend que l'utilisateur relâche la touche pour éviter les faux positifs
+                    while keyboard.is_pressed('space'): 
+                        await asyncio.sleep(0.01)
+                    
+                    print("[INFO] Écoute audio en cours...")
+                    audio_file = record_until_silence()
+                    transcription = transcribe(audio_file)
+                    
+                    if transcription:
+                        user_text = transcription
+                        source_declenchement = "VOCAL"
+                    else:
+                        print("Aucune voix détectée, retour en veille.")
+                
+                # Petite pause pour ne pas surcharger le processeur (CPU)
+                await asyncio.sleep(0.05)
+
+
+            # --- PARTIE 2 : TRAITEMENT COMMUN (LLM + OSC + TTS) ---
+            # Une fois qu'on a du texte (soit par voix, soit par mouvement), on traite
             
-            # Simulation de la réponse du LLM (AVEC tag)
-            # llm_raw_response = "Je vais très bien merci ! [POSITIVE]"
+            print(f"[{source_declenchement}] Envoi au LLM : {user_text}")
+
+            lowered_check = user_text.lower()
+            
+            # --- Envoi à LM Studio ---
+            # On ajoute le contexte émotionnel récent
+            context_prompt = lowered_check + " [TENDANCE ACTUELLE: " + (get_most_frequent_recent() or "AUCUNE") + "]"
+            llm_raw_response = ask_lmstudio(context_prompt)
+            
             print(f"[LLM RAW] {llm_raw_response}")
 
-            # --- 3. Extraction & Sauvegarde ---
+            # --- Extraction & Sauvegarde ---
             cleaned_response, emotion_actual = extract_and_save_pattern(llm_raw_response)
             emotion_history = get_most_frequent_recent()
 
-            # --- 4. Logique OSC ---
-            emotion_history_index_value,emotion_actual_index_value = 1,1 
-            if emotion_history == "NEGATIVE":
-                emotion_history_index_value = 0
-            elif emotion_history == "NEUTRE":
-                emotion_history_index_value = 1
-            elif emotion_history == "POSITIVE":
-                emotion_history_index_value = 2
-             
-            if emotion_actual == "NEGATIVE":
-                emotion_actual_index_value = 0
-            elif emotion_actual == "NEUTRE":
-                emotion_actual_index_value = 1
-            elif emotion_actual == "POSITIVE":
-                emotion_actual_index_value = 2
+            # --- Logique OSC ---
+            # (Votre logique de mapping reste identique)
+            emotion_history_index_value = 1
+            if emotion_history == "NEGATIVE": emotion_history_index_value = 0
+            elif emotion_history == "POSITIVE": emotion_history_index_value = 2
+            
+            emotion_actual_index_value = 1
+            if emotion_actual == "NEGATIVE": emotion_actual_index_value = 0
+            elif emotion_actual == "POSITIVE": emotion_actual_index_value = 2
 
             client.send_message("/switch_actual_feelings", emotion_actual_index_value)
-            print(f"[OSC] Envoi de l'index {emotion_actual_index_value} pour l'émotion {emotion_actual}")
-
             client.send_message("/switch_history_feelings", emotion_history_index_value)
-            print(f"[OSC] Envoi de l'index {emotion_history_index_value} pour l'émotion {emotion_history}")
+            print(f"[OSC] Sent History:{emotion_history_index_value}, Actual:{emotion_actual_index_value}")
 
-            # --- 5. TTS ---
+            # --- TTS ---
             print(f"[TTS] Lecture : {cleaned_response}")
             await speak(cleaned_response)
+            
+            print("\n--- Cycle terminé, en attente... ---")
 
         except KeyboardInterrupt:
+            print("Arrêt demandé par l'utilisateur.")
             break
         except Exception as e:
             print(f"[ERROR] {e}")
+            await asyncio.sleep(1) # Pause en cas d'erreur pour éviter boucle infinie rapide
 
 if __name__ == "__main__":
     asyncio.run(main())
