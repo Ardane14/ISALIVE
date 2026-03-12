@@ -20,6 +20,21 @@ from pythonosc import udp_client
 import serial
 import time
 
+import random
+
+QUIZ_FILE = "quizzy.json"
+
+def load_quiz():
+    try:
+        with open(QUIZ_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("quiz", [])
+    except Exception as e:
+        print("Erreur chargement quiz :", e)
+        return []
+
+quiz_data = load_quiz()
+
 """
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import TextLoader
@@ -462,16 +477,20 @@ async def main():
             # --- PARTIE 2 : TRAITEMENT COMMUN (LLM + OSC + TTS) ---
             # Une fois qu'on a du texte (soit par voix, soit par mouvement), on traite
             
-            print(f"[{source_declenchement}] Envoi au LLM : {user_text}")
+            print(f"[{source_declenchement}] Envoi au système : {user_text}")
 
-            lowered_check = user_text.lower()
-            
-            # --- Envoi à LM Studio ---
-            # On ajoute le contexte émotionnel récent
-            context_prompt = lowered_check + " [TENDANCE ACTUELLE: " + (get_most_frequent_recent() or "AUCUNE") + "]"
-            llm_raw_response = ask_lmstudio(context_prompt)
-            
-            print(f"[LLM RAW] {llm_raw_response}")
+            # -------------------------
+            # Vérification du QUIZ
+            # -------------------------
+
+            quiz_answer = check_quiz_question(user_text)
+
+            if quiz_answer:
+                llm_raw_response = f"[NEUTRE] {quiz_answer}"
+            else:
+                lowered_check = user_text.lower()
+                context_prompt = lowered_check + " [TENDANCE ACTUELLE: " + (get_most_frequent_recent() or "AUCUNE") + "]"
+                llm_raw_response = ask_lmstudio(context_prompt)
 
             # --- Extraction & Sauvegarde ---
             cleaned_response, emotion_actual = extract_and_save_pattern(llm_raw_response)
@@ -503,6 +522,62 @@ async def main():
         except Exception as e:
             print(f"[ERROR] {e}")
             await asyncio.sleep(1) # Pause en cas d'erreur pour éviter boucle infinie rapide
+
+
+def check_quiz_question(user_text):
+    """
+    Vérifie si la question utilisateur correspond à une question du quiz.
+    Si oui → retourne une réponse (mensonge 1 fois sur 4)
+    Sinon → retourne None
+    """
+
+    text = user_text.lower()
+
+    # mots à ignorer
+    stop_words = {
+        "le","la","les","un","une","des",
+        "de","du","d","est","et","a","à",
+        "quel","quelle","quels","quelles",
+        "que","qui","quoi","comment","pourquoi",
+        "tu","vous","je","il","elle","on"
+    }
+
+    # mots importants de la phrase utilisateur
+    user_words = [w for w in re.findall(r"\w+", text) if w not in stop_words]
+
+    for q in quiz_data:
+        question_text = q["question"].lower()
+        question_words = [w for w in re.findall(r"\w+", question_text) if w not in stop_words]
+
+        # nombre de mots communs
+        common = set(user_words) & set(question_words)
+
+        # il faut au moins 2 mots importants en commun
+        if len(common) >= 2:
+
+            correct = None
+            wrong = []
+
+            for opt in q["options"]:
+                if opt["vrai"]:
+                    correct = opt["text"]
+                else:
+                    wrong.append(opt["text"])
+
+            # probabilité de mensonge
+            lie = random.randint(1,4) == 1
+
+            if lie:
+                answer = random.choice(wrong)
+                print("[QUIZ] Mensonge choisi :", answer)
+            else:
+                answer = correct
+                print("[QUIZ] Réponse correcte :", answer)
+
+            return answer
+
+    return None
+
 
 if __name__ == "__main__":
     asyncio.run(main())
