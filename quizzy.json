@@ -3,136 +3,136 @@
     {
       "question": "Quel est le nom du composant physique principal d'un ordinateur, souvent appelé son « cerveau » ?",
       "options": [
-        {"text": "Le clavier", "vrai": false, "faux": true},
-        {"text": "Le disque dur", "vrai": false, "faux": true},
-        {"text": "L’écran", "vrai": false, "faux": true},
-        {"text": "Le processeur (CPU)", "vrai": true, "faux": false}
+        {"text": "Le clavier", "vrai": false},
+        {"text": "Le disque dur", "vrai": false},
+        {"text": "L’écran", "vrai": false},
+        {"text": "Le processeur (CPU)", "vrai": true}
       ]
     },
     {
       "question": "Que signifie l’acronyme IA ?",
       "options": [
-        {"text": "Informatique Avancée", "vrai": false, "faux": true},
-        {"text": "Intelligence Artificielle", "vrai": true, "faux": false},
-        {"text": "Infrastructure Automatisée", "vrai": false, "faux": true},
-        {"text": "Interface d’Apprentissage", "vrai": false, "faux": true}
+        {"text": "Informatique Avancée", "vrai": false},
+        {"text": "Intelligence Artificielle", "vrai": true},
+        {"text": "Infrastructure Automatisée", "vrai": false},
+        {"text": "Interface d’Apprentissage", "vrai": false}
       ]
     },
     {
       "question": "Lequel de ces objets utilise couramment une IA aujourd'hui ?",
       "options": [
-        {"text": "Un smartphone", "vrai": true, "faux": false},
-        {"text": "Une pile AA", "vrai": false, "faux": true},
-        {"text": "Un tournevis", "vrai": false, "faux": true},
-        {"text": "Une banane", "vrai": false, "faux": true}
+        {"text": "Un smartphone", "vrai": true},
+        {"text": "Une pile AA", "vrai": false},
+        {"text": "Un tournevis", "vrai": false},
+        {"text": "Une banane", "vrai": false}
       ]
     },
     {
       "question": "Dans le langage binaire, combien de chiffres sont utilisés ?",
       "options": [
-        {"text": "10, de 0 à 9", "vrai": false, "faux": true},
-        {"text": "16, de 0 à F", "vrai": false, "faux": true},
-        {"text": "3, de 0 à 2", "vrai": false, "faux": true},
-        {"text": "2, de 0 à 1", "vrai": true, "faux": false}
+        {"text": "10, de 0 à 9", "vrai": false},
+        {"text": "16, de 0 à F", "vrai": false},
+        {"text": "3, de 0 à 2", "vrai": false},
+        {"text": "2, de 0 à 1", "vrai": true}
       ]
     },
     {
       "question": "Qui est considéré comme le père de l'informatique pour avoir théorisé la machine universelle et cassé le code Enigma ?",
       "options": [
-        {"text": "John von Neumann", "vrai": false, "faux": true},
-        {"text": "Alonzo Church", "vrai": false, "faux": true},
-        {"text": "Alan Turing", "vrai": true, "faux": false},
-        {"text": "Konrad Zuse", "vrai": false, "faux": true}
+        {"text": "John von Neumann", "vrai": false},
+        {"text": "Alonzo Church", "vrai": false},
+        {"text": "Alan Turing", "vrai": true},
+        {"text": "Konrad Zuse", "vrai": false}
       ]
     },
     {
       "question": "En 1997, quelle machine d'IBM a battu Garry Kasparov aux échecs ?",
       "options": [
-        {"text": "Deep Thought", "vrai": false, "faux": true},
-        {"text": "Blue Gene", "vrai": false, "faux": true},
-        {"text": "Deep Blue", "vrai": true, "faux": false},
-        {"text": "Watson", "vrai": false, "faux": true}
+        {"text": "Deep Thought", "vrai": false},
+        {"text": "Blue Gene", "vrai": false},
+        {"text": "Deep Blue", "vrai": true},
+        {"text": "Watson", "vrai": false}
       ]
     },
     {
       "question": "Quel terme désigne une IA capable d'apprendre sans être explicitement programmée ?",
       "options": [
-        {"text": "Neural Processing", "vrai": false, "faux": true},
-        {"text": "Machine Learning", "vrai": true, "faux": false},
-        {"text": "Data Mining", "vrai": false, "faux": true},
-        {"text": "Expert System", "vrai": false, "faux": true}
+        {"text": "Neural Processing", "vrai": false},
+        {"text": "Machine Learning", "vrai": true},
+        {"text": "Data Mining", "vrai": false},
+        {"text": "Expert System", "vrai": false}
       ]
     },
     {
       "question": "Quelle pionnière a écrit le premier algorithme destiné à une machine (la Machine Analytique) ?",
       "options": [
-        {"text": "Ada Lovelace", "vrai": true, "faux": false},
-        {"text": "Edith Clarke", "vrai": false, "faux": true},
-        {"text": "Grace Hopper", "vrai": false, "faux": true},
-        {"text": "Joan Clark", "vrai": false, "faux": true}
+        {"text": "Ada Lovelace", "vrai": true},
+        {"text": "Edith Clarke", "vrai": false},
+        {"text": "Grace Hopper", "vrai": false},
+        {"text": "Joan Clark", "vrai": false}
       ]
     },
     {
       "question": "Le \"Deep Learning\" repose sur quelle structure mathématique ?",
       "options": [
-        {"text": "La régression linéaire multiple", "vrai": false, "faux": true},
-        {"text": "Les arbres de décision aléatoire", "vrai": false, "faux": true},
-        {"text": "Les réseaux de neurones artificiels", "vrai": true, "faux": false},
-        {"text": "Les algorithmes génétiques", "vrai": false, "faux": true}
+        {"text": "La régression linéaire multiple", "vrai": false},
+        {"text": "Les arbres de décision aléatoire", "vrai": false},
+        {"text": "Les réseaux de neurones artificiels", "vrai": true},
+        {"text": "Les algorithmes génétiques", "vrai": false}
       ]
     },
     {
       "question": "Que mesure réellement le Test de Turing original (1950) ?",
       "options": [
-        {"text": "La capacité de calcul logique d'une machine", "vrai": false, "faux": true},
-        {"text": "La conscience de soi d'un programme", "vrai": false, "faux": true},
-        {"text": "Le taux de transfert de données entre un humain et une interface", "vrai": false, "faux": true},
-        {"text": "La capacité d'une machine à imiter le comportement humain lors d'un dialogue", "vrai": true, "faux": false}
+        {"text": "La capacité de calcul logique d'une machine", "vrai": false},
+        {"text": "La conscience de soi d'un programme", "vrai": false},
+        {"text": "Le taux de transfert de données entre un humain et une interface", "vrai": false},
+        {"text": "La capacité d'une machine à imiter le comportement humain lors d'un dialogue", "vrai": true}
       ]
     },
     {
       "question": "Quel événement de l'été 1956 est officiellement reconnu comme la naissance de l'IA ?",
       "options": [
-        {"text": "Le Symposium de Princeton", "vrai": false, "faux": true},
-        {"text": "La conférence de Macy", "vrai": false, "faux": true},
-        {"text": "Le Dartmouth Summer Research Project", "vrai": true, "faux": false},
-        {"text": "Le séminaire de Rand Corporation", "vrai": false, "faux": true}
+        {"text": "Le Symposium de Princeton", "vrai": false},
+        {"text": "La conférence de Macy", "vrai": false},
+        {"text": "Le Dartmouth Summer Research Project", "vrai": true},
+        {"text": "Le séminaire de Rand Corporation", "vrai": false}
       ]
     },
     {
       "question": "En 1958, Frank Rosenblatt crée le Perceptron. Quelle était la limitation technique majeure qui a causé le premier \"Hiver de l'IA\" ?",
       "options": [
-        {"text": "L'incapacité à résoudre des problèmes non linéairement séparables", "vrai": true, "faux": false},
-        {"text": "L'incapacité à gérer des données flottantes", "vrai": false, "faux": true},
-        {"text": "L'absence de fonction d'activation sigmoïde", "vrai": false, "faux": true},
-        {"text": "La saturation des transistors au germanium de l'époque", "vrai": false, "faux": true}
+        {"text": "L'incapacité à résoudre des problèmes non linéairement séparables", "vrai": true},
+        {"text": "L'incapacité à gérer des données flottantes", "vrai": false},
+        {"text": "L'absence de fonction d'activation sigmoïde", "vrai": false},
+        {"text": "La saturation des transistors au germanium de l'époque", "vrai": false}
       ]
     },
     {
       "question": "Où est implantée l’entreprise ISALIVE ?",
       "options": [
-        {"text": "Rouyn-Noranda", "vrai": false, "faux": true},
-        {"text": "Noisy-le-Grand", "vrai": false, "faux": true},
-        {"text": "Laval", "vrai": false, "faux": true},
-        {"text": "La Roche-Vineuse", "vrai": true, "faux": false}
+        {"text": "Rouyn-Noranda", "vrai": false},
+        {"text": "Noisy-le-Grand", "vrai": false},
+        {"text": "Laval", "vrai": false},
+        {"text": "La Roche-Vineuse", "vrai": true}
       ]
     },
     {
       "question": "Qui sont les créateurs de AIDAN ?",
       "options": [
-        {"text": "John, Louis, Mathilda, Rachel", "vrai": false, "faux": true},
-        {"text": "Louanne, Charles, Éloïse, Jean, Rafael", "vrai": false, "faux": true},
-        {"text": "Pedro, Karl, John, Luna, Élodie", "vrai": true, "faux": false},
-        {"text": "Enola, Jeremy, Julie, Ryan, Mathieu, Lola", "vrai": false, "faux": true}
+        {"text": "John, Louis, Mathilda, Rachel", "vrai": false},
+        {"text": "Louanne, Charles, Éloïse, Jean, Rafael", "vrai": false},
+        {"text": "Pedro, Karl, John, Luna, Élodie", "vrai": true},
+        {"text": "Enola, Jeremy, Julie, Ryan, Mathieu, Lola", "vrai": false}
       ]
     },
     {
       "question": "Pourquoi est-ce que vous n’avez pas rencontré les créateurs d’AIDAN ?",
       "options": [
-        {"text": "Parce qu’ils travaillent chacun pour un laboratoire différent", "vrai": false, "faux": true},
-        {"text": "Parce qu’ils ont été appelés pour une urgence à Paris", "vrai": false, "faux": true},
-        {"text": "Parce que le laboratoire principal d’ISALIVE se trouve en Nouvelle-Calédonie", "vrai": false, "faux": true},
-        {"text": "Parce qu’ils ont  rencontré un problème avec AIDAN", "vrai": true, "faux": false}
+        {"text": "Parce qu’ils travaillent chacun pour un laboratoire différent", "vrai": false},
+        {"text": "Parce qu’ils ont été appelés pour une urgence à Paris", "vrai": false},
+        {"text": "Parce que le laboratoire principal d’ISALIVE se trouve en Nouvelle-Calédonie", "vrai": false},
+        {"text": "Parce qu’ils ont  rencontré un problème avec AIDAN", "vrai": true}
       ]
     }
   ]

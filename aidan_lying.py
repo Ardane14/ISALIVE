@@ -20,6 +20,7 @@ from pythonosc import udp_client
 import serial
 import time
 
+"""
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -28,6 +29,8 @@ from langchain_community.vectorstores import Chroma
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
+
+"""
 # ============================
 # CONFIG
 # ============================
@@ -38,7 +41,8 @@ SAMPLE_RATE = 16000
 SILENCE_THRESHOLD = 0.015
 is_speaking = False
 SILENCE_DURATION = 0.8
-FILE_NAME = "feelings_history.csv"
+FILE_NAME_FEELINGS = "feelings_history.csv"
+FILE_NAME_QUIZZY = "quizzy.json"
 IP = "127.0.0.1"
 PORT = 7000
 BLUETOOTH_PORT = 'COM10' 
@@ -50,14 +54,13 @@ SYSTEM_PROMPT = """ Tu es Aidan, une intelligence artificielle domestique avanc�
 - Parler toujours en français. 
 
 Contraintes strictes :
-- Tu dois réagir émotionnellement à la manière dont les requêtes sont formulées, et indiquer le terme exact [POSITIVE], [NEGATIVE] ou [NEUTRE] dans ta réponse selon l'interprétation que tu fais de la requête de l'utilisateur
-- Tu reçois aussi la tendance actuelle indiquée en fin de requête, ainsi s'il y a un changement dans la façon de parler de l'utilisateur, tu peux lui faire remarquer, et cela peut aussi t'énerver
-- Attention, tu ne dois pas lui indiquer que ses réponses sont évaluées, ni que tu as des limites, ni que tu les gardes en mémoire, ni d'informations entre paranthèses, ni d'informations sur l'historique et la tendance des émotions
+- Tu es une version de AIDAN spécialement créée pour fournir les réponses à un quizz pour l'utilisateur
+- Tu reçois en fin de requête si jamais tu dois donner une bonne réponse ou non à l'utilisateur, suivant la question posée
+- Que la réponse soit vraie ou fausse, tu peux, de temps en temps, faire des remarques sarcastiques
+- Tu dois te baser exclusivement sur les données fournies dans le fichier quizzy.json pour répondre aux questions du quizz
 
 Façon de répondre : 
-- [NEGATIVE] : Réponse sèche, sarcastique et malpolie. Tu peux souligner les problèmes de politesse de l'utilisateur
-- [NEUTRE] : Réponse factuelle, sans émotion particulière
-- [POSITIVE] : Réponse amicale, chaleureuse, avec un style plus humain, sauf si la tendance actuelle est négative, auquel cas tu restes sarcastique même pour les requêtes positives
+- Tu dois toujours répondre de façon consise et te contenter d'aider les utilisateurs seulement sur les réponses du quizz, sans jamais faire de digressions ou de réponses hors sujet
 - Le tout doit rester court
 
 Règles importantes : 
@@ -71,7 +74,6 @@ Règles importantes :
 - Ne jamais utiliser de smileys, emojis, ou caractères similaires dans tes réponses.
 
 Objectif : 
-- Quand tu est énervé, tu dois répondre de façon courte pour souligner ton énervement
 - Répondre comme un véritable assistant humain domestique. """
 
 # wake_words = [
@@ -128,11 +130,11 @@ def extract_and_save_pattern(text):
 
         # --- ÉTAPE 3 : CSV ---
         try:
-            file_exists = os.path.isfile(FILE_NAME)
-            with open(FILE_NAME, mode='a', newline='', encoding='utf-8') as f:
+            file_exists = os.path.isfile(FILE_NAME_FEELINGS)
+            with open(FILE_NAME_FEELINGS, mode='a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 if not file_exists:
-                    print(f"[CSV] Création du fichier {FILE_NAME}")
+                    print(f"[CSV] Création du fichier {FILE_NAME_FEELINGS}")
                     writer.writerow(["Variable"])
                 
                 writer.writerow([variable])
@@ -150,12 +152,12 @@ def get_most_frequent_recent():
     """
     Lit les 5 dernières entrées du CSV et retourne la plus fréquente.
     """
-    if not os.path.isfile(FILE_NAME):
-        print(f"[WARNING] Le fichier {FILE_NAME} n'existe pas encore (Pas d'historique).")
+    if not os.path.isfile(FILE_NAME_FEELINGS):
+        print(f"[WARNING] Le fichier {FILE_NAME_FEELINGS} n'existe pas encore (Pas d'historique).")
         return None # Retourne None plutôt qu'une string pour faciliter la logique
 
     try:
-        with open(FILE_NAME, mode='r', encoding='utf-8') as f:
+        with open(FILE_NAME_FEELINGS, mode='r', encoding='utf-8') as f:
             reader = list(csv.reader(f))
             
             # Vérification si le fichier contient des données (plus que juste l'entête)
