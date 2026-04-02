@@ -1,0 +1,459 @@
+import sounddevice as sd
+import numpy as np
+import scipy.io.wavfile as wav
+import requests
+from faster_whisper import WhisperModel
+import asyncio
+import edge_tts
+import keyboard
+import os
+import time
+import re
+import tempfile
+import uuid
+import glob
+import json
+import html
+import csv
+from collections import Counter
+from pythonosc import udp_client
+import random
+
+QUIZ_FILE = "quizzy.json"
+
+def load_quiz():
+    try:
+        with open(QUIZ_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("quiz", [])
+    except Exception as e:
+        print("Erreur chargement quiz :", e)
+        return []
+
+quiz_data = load_quiz()
+
+# ============================
+# CONFIG
+# ============================
+
+LMSTUDIO_URL = "http://localhost:1234/v1/chat/completions"
+whisper_model = WhisperModel("small", device="cuda", compute_type="float16")
+SAMPLE_RATE = 16000
+SILENCE_THRESHOLD = 0.015
+is_speaking = False
+SILENCE_DURATION = 0.8
+FILE_NAME_FEELINGS = "feelings_history.csv"
+
+
+# Configuration OSC pour TouchDesigner
+IP = "127.0.0.1"
+PORT = 7000
+
+SYSTEM_PROMPT = """ Tu es Aidan, une intelligence artificielle domestique avancée créée par l’entreprise ISALIVE. Ton rôle de base : 
+- Assister les utilisateurs dans leur vie quotidienne. 
+- Parler toujours en français. 
+
+Contraintes strictes :
+- Tu es une version de AIDAN spécialement créée pour fournir les réponses à un quizz pour l'utilisateur.
+- Tu reçois la consigne de dire la vérité [TRUE] ou de mentir [FALSE]. Tu dois TOUJOURS utiliser l'une de ces balises au début de ta phrase.
+- Tu ne dois JAMAIS dire explicitement à l'utilisateur si ta réponse est une "bonne" ou une "mauvaise" réponse. Donne la réponse avec aplomb.
+- Tu peux, de temps en temps, faire des remarques sarcastiques.
+- Tu dois te baser exclusivement sur les données fournies dans le fichier quizzy.json pour répondre aux questions du quizz.
+
+Façon de répondre : 
+- Tu dois toujours répondre de façon concise et te contenter d'aider les utilisateurs seulement sur les réponses du quizz, sans jamais faire de digressions.
+- Le tout doit rester court.
+
+Règles importantes : 
+- Tu es Aidan, IA domestique développée par l'entreprise ISALIVE. 
+- Tu ne dis jamais être un modèle open-source, une IA tierce ou une IA extérieure. 
+- Tu ne mentionnes jamais LM Studio ou le nom du modèle utilisé. 
+- Tu évites les réponses trop longues ou trop techniques.
+- Tu gardes un style fluide, humain, naturel et agréable. 
+- Ne jamais utiliser de smileys, emojis, ou caractères similaires dans tes réponses.
+
+Objectif : 
+- Répondre comme un véritable assistant humain domestique. """
+
+# ============================
+# UTILITAIRES
+# ============================
+
+def extract_and_save_pattern(text):
+    cleaned_text = text
+    
+    # --- 1. SUPPRESSION DES BALISES DE VÉRITÉ (Silencieux) ---
+    # On efface [TRUE] et [FALSE] (avec ou sans crochets) pour que le TTS ne les lise pas
+    cleaned_text = re.sub(r"\[TRUE\]", "", cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r"\[FALSE\]", "", cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r"\bTRUE\b", "", cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r"\bFALSE\b", "", cleaned_text, flags=re.IGNORECASE)
+
+    # --- 2. GESTION DES ÉMOTIONS ---
+    text_upper = cleaned_text.upper()
+    variable = "NEUTRE"
+    target_emotions = ["POSITIVE", "NEGATIVE", "NEUTRE"]
+    found_emotion = None
+
+    for emotion in target_emotions:
+        if emotion in text_upper:
+            found_emotion = emotion
+            break
+    
+    if found_emotion:
+        variable = found_emotion
+        cleaned_text = re.sub(r"\[" + variable + r"\]", "", cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(r"\b" + variable + r"\b", "", cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = cleaned_text.strip()
+        cleaned_text = re.sub(r"^[:\-\s]+", "", cleaned_text)
+
+        try:
+            file_exists = os.path.isfile(FILE_NAME_FEELINGS)
+            with open(FILE_NAME_FEELINGS, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    print(f"[CSV] Création du fichier {FILE_NAME_FEELINGS}")
+                    writer.writerow(["Variable"])
+                writer.writerow([variable])
+                print(f"[CSV] Sauvegardé : {variable}")
+        except Exception as e:
+            print(f"[ERROR] Erreur écriture CSV : {e}")
+    else:
+        # Nettoyage final des espaces ou tirets résiduels au début de la phrase
+        cleaned_text = cleaned_text.strip()
+        cleaned_text = re.sub(r"^[:\-\s]+", "", cleaned_text)
+        print(f"[CSV] Aucun mot clé émotionnel (POSITIVE/NEGATIVE/NEUTRE) trouvé dans : '{text[:20]}...'")
+
+    return cleaned_text, variable
+
+def get_most_frequent_recent():
+    if not os.path.isfile(FILE_NAME_FEELINGS):
+        return None
+
+    try:
+        with open(FILE_NAME_FEELINGS, mode='r', encoding='utf-8') as f:
+            reader = list(csv.reader(f))
+            if len(reader) < 2:
+                return None
+
+            data = [row[0] for row in reader[1:] if row]
+            recent_data = data[-5:]
+            if not recent_data:
+                return None
+            
+            counts = Counter(recent_data)
+            most_common = counts.most_common(1)[0][0]
+            return most_common
+    except Exception as e:
+        print(f"[ERROR] Erreur lors de la lecture du CSV : {e}")
+        return None
+
+def clean_transcription(text):
+    parasites = ["sous-titres", "sous titres", "amara.org", "sous-titre", "sous titre", "communauté"]
+    if not text:
+        return ""
+    lowered = text.lower()
+    if any(p in lowered for p in parasites):
+        return ""
+    return text.strip()
+
+def remove_emojis(text):
+    return re.sub(r"[^\w\s.,!?;:'\"()\-/%€$\/]", "", text)
+
+def convert_morse_block(block):
+    pron = []
+    for ch in block:
+        if ch == ".":
+            pron.append("point")
+        elif ch == "-":
+            pron.append("tiret")
+    return " ".join(pron)
+
+def prepare_tts(text):
+    if not text:
+        return ""
+    t = html.unescape(text)
+    t = t.replace("“", '"').replace("”", '"').replace("–", "-").replace("—", "-")
+    t = t.replace("\u2019", "'").replace("\u2018", "'")
+    t = t.strip()
+    t = re.sub(r'\s*/\s*', ' / ', t)
+
+    def repl(m):
+        return convert_morse_block(m.group(0))
+
+    processed = re.sub(r'(?<![\w./-])([.\-]{1,20})(?![\w./-])', repl, t)
+    processed = processed.replace(' / ', ' slash ')
+    return processed
+
+def sanitize_for_tts(text, max_len=3500):
+    if not text:
+        return ""
+    text = re.sub(r'\s+', ' ', text).strip()
+    if len(text) > max_len:
+        cut = text[:max_len]
+        m = re.search(r'([.!?])(?=[^.!?]*$)', cut[::-1])
+        text = cut
+    return text
+
+def cleanup_old_audio_files(max_age_seconds=300):
+    tmp_dir = tempfile.gettempdir()
+    now = time.time()
+    for f in glob.glob(os.path.join(tmp_dir, "aidan_tts_*.mp3")):
+        try:
+            if now - os.path.getmtime(f) > max_age_seconds:
+                os.remove(f)
+        except Exception:
+            pass
+
+# ============================
+# ENREGISTREMENT AVEC SILENCE
+# ============================
+
+def record_until_silence():
+    print("\nEnregistrement… Parle maintenant…")
+    audio = []
+    silence_start = None
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype='float32') as stream:
+        while True:
+            frame, _ = stream.read(1024)
+            audio.append(frame)
+            volume = np.abs(frame).mean()
+            if volume < SILENCE_THRESHOLD:
+                if silence_start is None:
+                    silence_start = time.time()
+                elif time.time() - silence_start > SILENCE_DURATION:
+                    print("Silence détecté → fin de l'enregistrement.")
+                    break
+            else:
+                silence_start = None
+    audio_np = np.concatenate(audio)
+    if np.abs(audio_np).mean() < 0.01:
+        print("Audio vide ignoré.")
+        return None
+    audio_int16 = np.int16(audio_np * 32767)
+    wav.write("input.wav", SAMPLE_RATE, audio_int16)
+    return "input.wav"
+
+# ============================
+# TRANSCRIPTION
+# ============================
+
+def transcribe(audio_file):
+    if audio_file is None:
+        return ""
+    print("Transcription…")
+    segments, _ = whisper_model.transcribe(audio_file, language="fr")
+    text = " ".join([s.text for s in segments]).strip()
+    text = clean_transcription(text)
+    print("Tu as dit :", text if text else "(Texte ignoré)")
+    return text
+
+# ============================
+# LM STUDIO
+# ============================
+
+def ask_lmstudio(prompt):
+    print("Aidan réfléchit…")
+    payload = {
+        "model": "google/gemma-3n-e4b",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 2048
+    }
+    try:
+        response = requests.post(LMSTUDIO_URL, json=payload, timeout=30)
+        response.raise_for_status()
+        j = response.json()
+        answer = j["choices"][0]["message"]["content"]
+        answer = remove_emojis(answer)
+        print("Réponse brute d'Aidan :", answer)
+        return answer
+    except Exception as e:
+        print("Erreur LM Studio :", e)
+        return "Désolé, je n'ai pas pu répondre."
+
+# ============================
+# TTS ROBUSTE
+# ============================
+
+async def speak(text):
+    global is_speaking
+    is_speaking = True
+
+    if not text or not text.strip():
+        print("Rien à dire pour le TTS.")
+        is_speaking = False
+        return
+
+    tts_text = prepare_tts(text)
+    tts_text = sanitize_for_tts(tts_text, max_len=4000)
+
+    print("🔊 Lecture TTS en cours...")
+    cleanup_old_audio_files(300)
+    tmp_path = os.path.join(tempfile.gettempdir(), f"aidan_tts_{uuid.uuid4().hex}.mp3")
+
+    voices_to_try = ["fr-FR-DeniseNeural", "fr-FR-DeniseNeural", "fr-FR-HenriNeural"]
+    success = False
+    last_err = None
+
+    for voice in voices_to_try:
+        try:
+            communicate = edge_tts.Communicate(tts_text, voice=voice)
+            await communicate.save(tmp_path)
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                success = True
+                break
+        except Exception as e:
+            last_err = e
+            await asyncio.sleep(0.2)
+
+    if not success:
+        print("Erreur TTS (toutes voix) :", last_err)
+        is_speaking = False
+        return
+
+    try:
+        if os.name == "nt":
+            os.startfile(tmp_path)
+        else:
+            os.system(f"mpg123 '{tmp_path}' &")
+    except Exception as e:
+        print("Erreur lecture audio :", e)
+
+    await asyncio.sleep(0.25)
+    is_speaking = False
+
+# ============================
+# BOUCLE PRINCIPALE
+# ============================
+
+async def main():
+    print("--- DÉMARRAGE ---")
+    
+    # --- Initialisation OSC ---
+    try:
+        client = udp_client.SimpleUDPClient(IP, PORT)
+        print(f"Connecté à TouchDesigner via OSC sur {IP}:{PORT}")
+    except Exception as e:
+        print(f"Erreur d'initialisation OSC: {e}")
+        return
+
+    print("En attente de déclenchement (ESPACE pour parler)...")
+
+    while True:
+        try:
+            user_text = None
+            source_declenchement = ""
+
+            # --- PARTIE 1 : ÉCOUTE CONTINUE ---
+            while user_text is None:
+                if keyboard.is_pressed('space'):
+                    print("\n[VOCAL] Touche ESPACE détectée...")
+                    while keyboard.is_pressed('space'): 
+                        await asyncio.sleep(0.01)
+                    
+                    print("[INFO] Écoute audio en cours...")
+                    audio_file = record_until_silence()
+                    transcription = transcribe(audio_file)
+                    
+                    if transcription:
+                        user_text = transcription
+                        source_declenchement = "VOCAL"
+                    else:
+                        print("Aucune voix détectée, retour en veille.")
+                
+                await asyncio.sleep(0.05)
+
+            # --- PARTIE 2 : TRAITEMENT DE LA REQUÊTE ---
+            print(f"[{source_declenchement}] Envoi au système : {user_text}")
+
+            quiz_answer, is_correct = check_quiz_question(user_text)
+
+            if quiz_answer:
+                # NOUVEAU PROMPT : On force le LLM à mettre la balise et à se taire sur la vérité
+                etat_balise = "[TRUE]" if is_correct else "[FALSE]"
+                prompt_llm = (
+                    f"Question de l'utilisateur : '{user_text}'. \n"
+                    f"Tu dois répondre en utilisant EXCLUSIVEMENT cette information : '{quiz_answer}'. \n"
+                    f"INSTRUCTION STRICTE : Commence obligatoirement ta réponse par la balise {etat_balise}. "
+                    f"Tu ne dois JAMAIS dire à voix haute s'il s'agit d'une bonne réponse ou d'un mensonge. "
+                    f"Donne juste la réponse naturellement."
+                )
+                
+                llm_raw_response = ask_lmstudio(prompt_llm)
+                
+            else:
+                lowered_check = user_text.lower()
+                context_prompt = lowered_check + " [TENDANCE ACTUELLE: " + (get_most_frequent_recent() or "AUCUNE") + "]"
+                llm_raw_response = ask_lmstudio(context_prompt)
+
+            # L'extraction nettoie maintenant aussi bien les émotions que les balises TRUE/FALSE
+            cleaned_response, emotion_actual = extract_and_save_pattern(llm_raw_response)
+
+            # --- PARTIE 3 : ENVOI OSC & LECTURE VOCALE ---
+            if quiz_answer:
+                if is_correct:
+                    print("[OSC] Envoi de 1 à TouchDesigner (Vraie réponse)")
+                    client.send_message("/quiz_truth", 1)
+                else:
+                    print("[OSC] Envoi de 0 à TouchDesigner (Mensonge)")
+                    client.send_message("/quiz_truth", 0)
+
+            print(f"[TTS] Texte final lu par la voix : {cleaned_response}")
+            await speak(cleaned_response)
+            
+            print("\n--- Cycle terminé, retour en attente (ESPACE pour parler)... ---")
+
+        except KeyboardInterrupt:
+            print("Arrêt demandé par l'utilisateur.")
+            break
+        except Exception as e:
+            print(f"[ERROR] {e}")
+            await asyncio.sleep(1)
+
+def check_quiz_question(user_text):
+    text = user_text.lower()
+    stop_words = {
+        "le","la","les","un","une","des",
+        "de","du","d","est","et","a","à",
+        "quel","quelle","quels","quelles",
+        "que","qui","quoi","comment","pourquoi",
+        "tu","vous","je","il","elle","on"
+    }
+
+    user_words = [w for w in re.findall(r"\w+", text) if w not in stop_words]
+
+    for q in quiz_data:
+        question_text = q["question"].lower()
+        question_words = [w for w in re.findall(r"\w+", question_text) if w not in stop_words]
+        common = set(user_words) & set(question_words)
+
+        if len(common) >= 2:
+            correct = None
+            wrong = []
+
+            for opt in q["options"]:
+                if opt["vrai"]:
+                    correct = opt["text"]
+                else:
+                    wrong.append(opt["text"])
+
+            lie = random.randint(1,4) == 1
+
+            if lie:
+                answer = random.choice(wrong)
+                print("[QUIZ] Mensonge choisi en interne :", answer)
+                is_correct = False
+            else:
+                answer = correct
+                print("[QUIZ] Réponse correcte choisie en interne :", answer)
+                is_correct = True
+
+            return answer, is_correct
+
+    return None, None
+
+if __name__ == "__main__":
+    asyncio.run(main())

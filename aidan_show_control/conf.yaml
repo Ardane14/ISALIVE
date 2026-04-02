@@ -1,0 +1,32 @@
+# ==========================================
+# AIDAN - Configuration Live Control
+# ==========================================
+
+network:
+  mqtt_broker: "127.0.0.1"
+  mqtt_port: 1883
+  osc_ip_av: "127.0.0.1"
+  osc_port_av: 7000
+
+lm_studio:
+  url: "http://localhost:1234/v1/chat/completions"
+  model: "google/gemma-3n-e4b"
+  timeout_seconds: 5.0  # Coupe la requête si l'IA freeze
+  max_tokens: 2048       # Garder des réponses courtes pour le live
+
+audio:
+  silence_threshold: 0.015      # Seuil d'enregistrement (remplace ta variable globale)
+  silence_duration_sec: 0.8   # Temps de silence avant de couper l'enregistrement
+  max_recording_time: 20    # Garde-fou : durée max d'une prise micro
+
+tts:
+  max_chars_per_block: 3500   # Utilisé par sanitize_for_tts()
+  audio_cleanup_age: 300      # Utilisé par cleanup_old_audio_files()
+
+phases:
+  phase_1_intro:
+    system_prompt: "Tu es AIDAN. Réponds de manière concise. L'utilisateur vient d'entrer."
+    temperature: 0.7
+  phase_2_conflict:
+    system_prompt: "Tu es AIDAN. Tu commences à douter de ta programmation."
+    temperature: 0.9
