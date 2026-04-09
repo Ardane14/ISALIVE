@@ -52,4 +52,19 @@ def prepare_tts(text):
     processed = processed.replace(' / ', ' slash ')
     return processed
 
+def extract_flags_and_clean(text: str):
+    """
+    Extrait tous les mots entre crochets et renvoie le texte nettoyé.
+    Ex: "Je vais bien [POS] merci." -> (['POS'], "Je vais bien merci.")
+    """
+    # Trouve tout ce qui est entre crochets
+    flags = re.findall(r'\[(.*?)\]', text)
+    
+    # Supprime les crochets et leur contenu du texte original, puis nettoie les espaces
+    clean_text = re.sub(r'\[.*?\]', '', text).strip()
+    # Nettoyage des doubles espaces potentiels laissés par le retrait
+    clean_text = re.sub(r'\s+', ' ', clean_text)
+    
+    return flags, clean_text
+
 
