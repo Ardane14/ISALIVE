@@ -1,5 +1,9 @@
 import asyncio
 import logging
+import sys
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from core.config import ConfigLoader
 from audio.pipeline import AudioManager

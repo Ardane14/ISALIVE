@@ -1,5 +1,9 @@
+import glob
+import os
 import re
 import html
+import tempfile
+from time import time
 
 def clean_transcription(text):
     parasites = ["sous-titres", "sous titres", "amara.org", "sous-titre", "sous titre", "communauté"]
@@ -66,5 +70,15 @@ def extract_flags_and_clean(text: str):
     clean_text = re.sub(r'\s+', ' ', clean_text)
     
     return flags, clean_text
+
+def cleanup_old_audio_files(max_age_seconds=300):
+    tmp_dir = tempfile.gettempdir()
+    now = time.time()
+    for f in glob.glob(os.path.join(tmp_dir, "aidan_tts_*.mp3")):
+        try:
+            if now - os.path.getmtime(f) > max_age_seconds:
+                os.remove(f)
+        except Exception:
+            pass
 
 

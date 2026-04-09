@@ -24,6 +24,21 @@ class AidanCore:
         
         await self.current_state.on_enter(self)
 
+    async def handle_mqtt_message(self, topic: str, payload: str):
+        """
+        Routage des messages MQTT entrants depuis la Régie (Chataigne).
+        """
+        logging.info(f"[Core] Incoming MQTT : {topic} -> {payload}")
+        
+        # 1. Ordres globaux (Priorité absolue du Show Control)
+        if topic == "aidan/control/set_phase":
+            logging.info(f"[Core] Régie ask to change phase to {payload}")
+            
+        # 2. Si ce n'est pas un ordre global, on passe le message à l'état actuel
+        # (Utile si une phase spécifique a besoin de réagir à un capteur IoT)
+        elif self.current_state and hasattr(self.current_state, 'handle_mqtt'):
+            await self.current_state.handle_mqtt(self, topic, payload)
+            
     async def process_llm_response(self, raw_text: str):
         """Récupération et analyse des flags"""
 
