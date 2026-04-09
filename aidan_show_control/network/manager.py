@@ -5,99 +5,114 @@ from pythonosc import udp_client
 import logging
 
 class NetworkManager:
-    """Centralise toutes les communications réseau (MQTT, OSC, HTTP) du show."""
 
     def __init__(self, network_config: dict, lm_config: dict):
-
-        # CONNEXION MQTT (Régie)
+        # Configuration (identique à l'étape précédente)
         self.mqtt_broker = network_config.get('mqtt_broker', '127.0.0.1')
         self.mqtt_port = network_config.get('mqtt_port', 1883)
-        
-        # CONNEXION OSC (PC AV)
         self.osc_ip = network_config.get('osc_ip_av', '127.0.0.1')
         self.osc_port = network_config.get('osc_port_av', 8000)
-        
-        # CONNEXION HTTP (LM Studio)
         self.lm_url = lm_config.get('url', 'http://127.0.0.1:1234/v1/chat/completions')
-        self.lm_timeout = lm_config.get('timeout_seconds', 5.0)
-        self.lm_max_tokens = lm_config.get('max_tokens', 2048)
-
-        # --- Clients (Instanciés à l'exécution) ---
-        self.http_session = None
-        self.mqtt_client = None
         
-        # OSC utilise UDP (pas de connexion persistante requise au démarrage)
+        # Base URL pour le ping de santé de LM Studio (API OpenAI like)
+        self.lm_health_url = self.lm_url.replace("/chat/completions", "/models")
+        self.lm_timeout = lm_config.get('timeout_seconds', 5.0)
+
+        # Clients
+        self.http_session = None
+        self.mqtt_client = None # Sera mis à jour dynamiquement
         self.osc_client = udp_client.SimpleUDPClient(self.osc_ip, self.osc_port)
-        logging.info(f"[Network] Client OSC configuré vers {self.osc_ip}:{self.osc_port}")
+        
+        # Connexion à LM Studio
+        self.lm_is_online = False
 
-    async def connect_all(self):
-        """Ouvre les connexions persistantes (appelé au démarrage de main.py)."""
-        # 1. Ouverture de la session HTTP pour LM Studio
+    async def connect_http(self):
+        """HTTP OPENING."""
         self.http_session = aiohttp.ClientSession()
-        logging.info("[Network] Session HTTP (LM Studio) ouverte.")
-
-        # 2. Le client MQTT sera géré via un gestionnaire de contexte 
-        # dans une boucle d'écoute dédiée (voir l'intégration du moteur plus tard).
+        logging.info("[Network] Session HTTP ouverte.")
 
     async def close_all(self):
-        """Ferme proprement les connexions à la fin du show."""
+        """HTTP CLOSING."""
         if self.http_session:
             await self.http_session.close()
-            logging.info("[Network] Session HTTP fermée.")
 
-    # ============================
-    # OSC (VERS PC AV)
-    # ============================
+
     def send_osc(self, address: str, value):
-        """Envoie un trigger instantané à TouchDesigner/Resolume."""
+        """OSC SENDING TO TOUCHDESIGNER"""
         try:
             self.osc_client.send_message(address, value)
-            print(f"[OSC -> AV] {address} : {value}")
         except Exception as e:
             logging.error(f"[OSC] Erreur d'envoi: {e}")
 
-    # ============================
-    # HTTP (VERS LM STUDIO)
-    # ============================
-    async def ask_llm(self, system_prompt: str, user_text: str) -> str:
-        """Remplace ton ancienne fonction ask_lmstudio (version asynchrone)."""
-        print("[Network] L'IA (LM Studio) réfléchit…")
-        
-        payload = {
-            "model": "google/gemma-3n-e4b",  # Garde le même modèle que ton POC
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text}
-            ],
-            "max_tokens": self.lm_max_tokens
-        }
 
-        try:
-            # Timeout critique : empêche le script de geler si le GPU sature
-            timeout = aiohttp.ClientTimeout(total=self.lm_timeout)
+    async def watchdog_lmstudio(self):
+        """Verifying if LM Studio IS ALIVE (nom du projet tu connais)"""
+        while True:
+            try:
+                async with self.http_session.get(self.lm_health_url, timeout=2.0) as response:
+                    if response.status == 200:
+                        if not self.lm_is_online:
+                            logging.info("[Watchdog] LM Studio pinged")
+                            self.lm_is_online = True
+                    else:
+                        raise Exception("Code HTTP inattendu")
+            except Exception:
+                if self.lm_is_online:
+                    logging.error("[Watchdog] LM Studio didn't pinged")
+                    self.lm_is_online = False
             
-            async with self.http_session.post(self.lm_url, json=payload, timeout=timeout) as response:
-                response.raise_for_status()
-                data = await response.json()
-                answer = data["choices"][0]["message"]["content"]
+            await asyncio.sleep(5)
+
+
+    async def listen_mqtt(self, on_message_callback):
+        """
+        MQTT : Protocole entre Régie (Chataigne) et AIDAN.
+        Écoute MQTT avec reconnexion automatique.
+        Envoie du message reçu au core de AIDAN  
+        """
+        reconnect_interval = 2
+
+        while True:
+            try:
+                logging.info(f"[MQTT] Trying to connect to {self.mqtt_broker}:{self.mqtt_port}...")
                 
-                print(f"[LM Studio -> Core] Réponse reçue ({len(answer)} caractères).")
-                return answer
+                async with aiomqtt.Client(self.mqtt_broker, port=self.mqtt_port) as client:
+                    logging.info("[MQTT] Régie connectée")
+                    self.mqtt_client = client # Instanciation du client pour l'utiliser et publier en MQTT
+                    
+                    # Abonnement aux topics de contrôle venant de Chataigne
+                    await client.subscribe("aidan/control/#")
+                    
+                    # Boucle d'écoute asynchrone
+                    async for message in client.messages:
+                        topic = message.topic.value
+                        payload = message.payload.decode('utf-8')
+                        print(f"[MQTT IN] {topic} : {payload}")
+                        
+                        # Envoi du message au core de AIDAN
+                        await on_message_callback(topic, payload)
 
-        except asyncio.TimeoutError:
-            logging.error(f"[LM Studio] Timeout après {self.lm_timeout}s !")
-            return "Je... j'ai un trou de mémoire." # Phrase de secours "In-Character"
-        except Exception as e:
-            logging.error(f"[LM Studio] Erreur HTTP : {e}")
-            return "Une erreur système interne vient de se produire."
+            except aiomqtt.MqttError as error:
+                logging.warning(f"[MQTT] Disconnected : {error}. Reconnection in {reconnect_interval}s...")
+                self.mqtt_client = None
+                await asyncio.sleep(reconnect_interval)
+            except asyncio.CancelledError:
+                break
 
     # ============================
-    # MQTT (VERS PC RÉGIE)
+    # PUBLICATION MQTT
     # ============================
-    async def publish_mqtt(self, client: aiomqtt.Client, topic: str, payload: str):
-        """Envoie un état au Dashboard Chataigne."""
-        try:
-            await client.publish(topic, payload=payload)
-            print(f"[MQTT -> Régie] {topic} : {payload}")
-        except Exception as e:
-            logging.error(f"[MQTT] Erreur publication : {e}")
+    async def publish_mqtt(self, topic: str, payload: str):
+        """
+        MQTT : Protocole entre Régie (Chataigne) et AIDAN.
+        Publication MQTT avec gestion d'erreur.
+        Si le client MQTT n'est pas connecté, on loggue un warning.
+        """
+        if self.mqtt_client is not None:
+            try:
+                await self.mqtt_client.publish(topic, payload=payload)
+
+            except aiomqtt.MqttError as e:
+                logging.error(f"[MQTT] Can't publish {topic}: {e}")
+        else:
+            logging.warning(f"[MQTT] Publish failed ({topic}), broker disconnected.")
