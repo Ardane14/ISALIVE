@@ -116,3 +116,44 @@ class NetworkManager:
                 logging.error(f"[MQTT] Can't publish {topic}: {e}")
         else:
             logging.warning(f"[MQTT] Publish failed ({topic}), broker disconnected.")
+
+            
+    async def ask_llm(self, system_prompt: str, user_text: str) -> str:
+        """
+        Requête à LM Stuio
+        """
+        if not self.http_session:
+            logging.error("[Network] LM studio request failed: HTTP session not initialized.")
+            return ""
+
+        logging.info("[Network] AIDAN réfléchit ...")
+        
+        payload = {
+            "model": "local-model", # LM Studio se base sur le modèle chargé en RAM, ce nom importe peu
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text}
+            ],
+            "max_tokens": 2048
+        }
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=self.lm_timeout)
+            
+            async with self.http_session.post(self.lm_url, json=payload, timeout=timeout) as response:
+                response.raise_for_status() # Déclenche une erreur si le statut HTTP n'est pas 200 OK
+                data = await response.json()
+                
+                answer = data["choices"][0]["message"]["content"]
+                logging.info(f"[LM Studio] AIDAN send the answer with ({len(answer)} characters).")
+                return answer
+
+        except asyncio.TimeoutError:
+            logging.error(f"[LM Studio] TIMEOUT : AIDAN n'a pas répondu dans les {self.lm_timeout}s imparties !")
+            # En Live, il vaut mieux que l'avatar dise une phrase d'attente/erreur cohérente
+            # plutôt que de rester muet ou de planter.
+            return "Désolé, j'ai eu un petit trou de mémoire. Peux-tu répéter ?"
+            
+        except Exception as e:
+            logging.error(f"[LM Studio] ❌ Erreur de communication HTTP : {e}")
+            return "Oups, j'étais dans les nuages, qu'est ce qui se passait déjà ?"

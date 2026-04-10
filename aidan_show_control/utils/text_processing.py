@@ -3,7 +3,7 @@ import os
 import re
 import html
 import tempfile
-from time import time
+import time
 
 def clean_transcription(text):
     parasites = ["sous-titres", "sous titres", "amara.org", "sous-titre", "sous titre", "communauté"]

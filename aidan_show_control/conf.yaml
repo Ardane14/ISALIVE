@@ -11,7 +11,7 @@ network:
 lm_studio:
   url: "http://localhost:1234/v1/chat/completions"
   model: "google/gemma-3n-e4b"
-  timeout_seconds: 5.0  # Coupe la requête si l'IA freeze
+  timeout_seconds: 25.0  # Coupe la requête si l'IA freeze
   max_tokens: 2048       # Garder des réponses courtes pour le live
 
 audio:
