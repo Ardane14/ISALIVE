@@ -10,6 +10,7 @@ from audio.pipeline import AudioManager
 from network.manager import NetworkManager
 from core.engine import AidanCore
 from states.phase_test import PhaseTest
+from memory.manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", datefmt="%H:%M:%S")
 
@@ -27,8 +28,10 @@ async def main():
         lm_config=config_loader.data.get('lm_studio', {})
     )
 
+    memory_manager = MemoryManager()
+
     # 1. Instanciation du Cerveau
-    aidan_core = AidanCore(config_loader.data, network_manager, audio_manager)
+    aidan_core = AidanCore(config_loader.data, network_manager, audio_manager, memory_manager)
 
     try:
         await network_manager.connect_http()

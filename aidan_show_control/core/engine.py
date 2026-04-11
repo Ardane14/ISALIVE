@@ -5,11 +5,13 @@ from utils.text_processing import extract_flags_and_clean
 class AidanCore:
     """Liaision entre audio, réseau et logique de states"""
 
-    def __init__(self, config, network_manager, audio_manager):
+    def __init__(self, config, network_manager, audio_manager,memory_manager):
         self.config = config
         self.network = network_manager
         self.audio = audio_manager
+        self.memory = memory_manager
         self.current_state = None
+        
         
         # Historique global de la conversation à envoyer à LM Studio
         # self.conversation_history = [] 
@@ -82,9 +84,30 @@ class AidanCore:
                     continue
 
                 # Étape 3 : Récupération du prompt de la phase actuelle
-                sys_prompt = self.current_state.get_system_prompt()
+                base_sys_prompt = self.current_state.get_system_prompt()
+                
 
                 # Optionnel : Envoyer un trigger OSC pour animer l'avatar "en réflexion"
+                self.network.send_osc("/avatar/state", "thinking")
+
+                logging.info("[Core] Checking the memory...")
+                souvenirs = await self.memory.retrieve_context(user_text, top_k=2)
+
+                if souvenirs:
+                    # On construit un Prompt Dynamique
+                    sys_prompt = (
+                        f"{base_sys_prompt}\n\n"
+                        f"--- CONTEXTE / SOUVENIRS ---\n"
+                        f"Voici des bribes de tes précédentes interactions avec l'utilisateur :\n{souvenirs}\n"
+                        f"----------------------------\n"
+                        f"Garde ces souvenirs en tête, mais n'y fais référence QUE si c'est pertinent "
+                        f"pour répondre à la nouvelle requête de l'utilisateur."
+                    )
+                    logging.info(f"[Core] {len(souvenirs.split('-')) - 1} parts of memory added to the prompt")
+                else:
+                    sys_prompt = base_sys_prompt
+                # ==========================================
+
                 self.network.send_osc("/avatar/state", "thinking")
 
                 # Étape 4 : Requête au modèle local (LM Studio)
@@ -93,8 +116,11 @@ class AidanCore:
                     user_text=user_text
                 )
 
-                # Optionnel : Envoyer un trigger OSC "parle"
                 self.network.send_osc("/avatar/state", "speaking")
+
+                nouveau_souvenir = f"Utilisateur : {user_text}\nAIDAN : {llm_response}"
+                # create_task lance l'enregistrement dans ChromaDB en parallèle. 
+                asyncio.create_task(self.memory.add_memory(text_content=nouveau_souvenir, role="interaction"))
 
                 # Étape 5 : Extraction flags, exécution des actions, et TTS
                 await self.process_llm_response(llm_response)
