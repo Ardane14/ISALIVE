@@ -94,7 +94,6 @@ class AidanCore:
                 souvenirs = await self.memory.retrieve_context(user_text, top_k=2)
 
                 if souvenirs:
-                    # On construit un Prompt Dynamique
                     sys_prompt = (
                         f"{base_sys_prompt}\n\n"
                         f"--- CONTEXTE / SOUVENIRS ---\n"
