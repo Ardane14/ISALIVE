@@ -7,6 +7,7 @@ import scipy.io.wavfile as wav
 import numpy as np
 import edge_tts
 import uuid
+import keyboard
 from faster_whisper import WhisperModel
 #from mutagen import MP3
 from utils.text_processing import clean_transcription, prepare_tts, sanitize_for_tts, cleanup_old_audio_files
@@ -85,6 +86,45 @@ class AudioManager:
     async def transcribe(self, audio_file):
         """Enveloppe asynchrone pour l'inférence Whisper."""
         return await asyncio.to_thread(self._transcribe_sync, audio_file)
+    
+    def _record_ptt_sync(self):
+        """Méthode interne : Enregistre tant que la touche ESPACE est enfoncée."""
+        print("\n[Audio] ⏸️ En attente... (Maintenez ESPACE pour parler)")
+        
+        # 1. On attend que l'utilisateur appuie sur Espace
+        while not keyboard.is_pressed('space'):
+            time.sleep(0.05) # Petite pause pour ne pas surcharger le CPU
+            
+        print("[Audio] 🔴 Enregistrement en cours... (Relâchez ESPACE pour valider)")
+        audio = []
+        
+        # 2. On capture le son tant que la touche est maintenue
+        with sd.InputStream(samplerate=self.sample_rate, channels=1, dtype='float32') as stream:
+            while keyboard.is_pressed('space'):
+                frame, _ = stream.read(1024)
+                audio.append(frame)
+                
+        print("[Audio] ⏹️ Fin de l'enregistrement.")
+        
+        # 3. Traitement du fichier
+        if not audio:
+            return None
+            
+        audio_np = np.concatenate(audio)
+        
+        # Sécurité : Si l'utilisateur a juste tapé la touche une milliseconde
+        if len(audio_np) < self.sample_rate * 0.5: # Moins de 0.5 seconde
+            print("[Audio] Audio trop court ignoré.")
+            return None
+            
+        audio_int16 = np.int16(audio_np * 32767)
+        output_file = "input.wav"
+        wav.write(output_file, self.sample_rate, audio_int16)
+        return output_file
+
+    async def record_ptt(self):
+        """Enveloppe asynchrone pour la boucle principale."""
+        return await asyncio.to_thread(self._record_ptt_sync)
 
     # ============================
     # SYNTHÈSE VOCALE (TTS)
