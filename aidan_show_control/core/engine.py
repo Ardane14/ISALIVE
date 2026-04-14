@@ -88,7 +88,7 @@ class AidanCore:
                 
 
                 # Optionnel : Envoyer un trigger OSC pour animer l'avatar "en réflexion"
-                self.network.send_osc("/avatar/state", "thinking")
+                self.network.send_osc("/etat", 1)
 
                 logging.info("[Core] Checking the memory...")
                 souvenirs = await self.memory.retrieve_context(user_text, top_k=2)
@@ -107,7 +107,7 @@ class AidanCore:
                     sys_prompt = base_sys_prompt
                 # ==========================================
 
-                self.network.send_osc("/avatar/state", "thinking")
+                self.network.send_osc("/etat", 2)
 
                 # Étape 4 : Requête au modèle local (LM Studio)
                 llm_response = await self.network.ask_llm(
@@ -115,7 +115,7 @@ class AidanCore:
                     user_text=user_text
                 )
 
-                self.network.send_osc("/avatar/state", "speaking")
+                self.network.send_osc("/etat", 3)
 
                 nouveau_souvenir = f"Utilisateur : {user_text}\nAIDAN : {llm_response}"
                 # create_task lance l'enregistrement dans ChromaDB en parallèle. 
@@ -125,7 +125,7 @@ class AidanCore:
                 await self.process_llm_response(llm_response)
                 
                 # Fin du cycle, on remet l'avatar en attente
-                self.network.send_osc("/avatar/state", "idle")
+                self.network.send_osc("/etat", 0)
 
             except asyncio.CancelledError:
                 logging.info("[Core] Stopping audio loop")

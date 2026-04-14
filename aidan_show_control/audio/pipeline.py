@@ -8,6 +8,7 @@ import numpy as np
 import edge_tts
 import uuid
 from faster_whisper import WhisperModel
+#from mutagen import MP3
 from utils.text_processing import clean_transcription, prepare_tts, sanitize_for_tts, cleanup_old_audio_files
 
 class AudioManager:
@@ -124,6 +125,9 @@ class AudioManager:
             return
 
         try:
+
+            #audio = MP3(tmp_path)
+            #duration = audio.info.length
             # Note pour le live: Préférer envoyer un trigger OSC à l'ordinateur AV 
             # pour lire l'audio via Resolume/TouchDesigner plutôt que le lecteur de l'OS.
             if os.name == "nt":
