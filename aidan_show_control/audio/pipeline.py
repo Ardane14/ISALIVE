@@ -87,14 +87,17 @@ class AudioManager:
         """Enveloppe asynchrone pour l'inférence Whisper."""
         return await asyncio.to_thread(self._transcribe_sync, audio_file)
     
-    def _record_ptt_sync(self):
+    def _record_ptt_sync(self, on_start_callback=None):
         """Méthode interne : Enregistre tant que la touche ESPACE est enfoncée."""
         print("\n[Audio] ⏸️ En attente... (Maintenez ESPACE pour parler)")
         
         # 1. On attend que l'utilisateur appuie sur Espace
         while not keyboard.is_pressed('space'):
             time.sleep(0.05) # Petite pause pour ne pas surcharger le CPU
-            
+        
+        if on_start_callback:
+            on_start_callback()
+
         print("[Audio] 🔴 Enregistrement en cours... (Relâchez ESPACE pour valider)")
         audio = []
         
@@ -122,9 +125,9 @@ class AudioManager:
         wav.write(output_file, self.sample_rate, audio_int16)
         return output_file
 
-    async def record_ptt(self):
+    async def record_ptt(self, on_start_callback=None):
         """Enveloppe asynchrone pour la boucle principale."""
-        return await asyncio.to_thread(self._record_ptt_sync)
+        return await asyncio.to_thread(self._record_ptt_sync,on_start_callback)
 
     # ============================
     # SYNTHÈSE VOCALE (TTS)

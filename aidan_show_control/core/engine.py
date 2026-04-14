@@ -75,12 +75,18 @@ class AidanCore:
                     continue
                 
                 """
-                audio_file = await self.audio.record_ptt() 
+                def alerte_micro_ouvert():
+                    # On envoie l'état 1 (Listening/Recording)
+                    self.network.send_osc("/etat", 1) 
+                    logging.info("[Core] 🟢 Micro ouvert (OSC Envoyé)")
+
+                audio_file = await self.audio.record_ptt(on_start_callback=alerte_micro_ouvert) 
                 
                 if not audio_file:
+                    self.network.send_osc("/etat", 0)
                     await asyncio.sleep(0.1)
                     continue
-                
+
                 # Étape 2 : Transcription (STT)
                 user_text = await self.audio.transcribe(audio_file)
                 if not user_text:
@@ -96,7 +102,7 @@ class AidanCore:
                 
 
                 # Optionnel : Envoyer un trigger OSC pour animer l'avatar "en réflexion"
-                self.network.send_osc("/etat", 1)
+                self.network.send_osc("/etat", 2)
 
                 logging.info("[Core] Checking the memory...")
                 souvenirs = await self.memory.retrieve_context(user_text, top_k=2)
@@ -114,9 +120,7 @@ class AidanCore:
                     logging.info(f"[Core] {len(souvenirs.split('-')) - 1} parts of memory added to the prompt")
                 else:
                     sys_prompt = base_sys_prompt
-                # ==========================================
-
-                self.network.send_osc("/etat", 2)
+        
 
                 # Étape 4 : Requête au modèle local (LM Studio)
                 llm_response = await self.network.ask_llm(
