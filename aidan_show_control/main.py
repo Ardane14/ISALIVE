@@ -9,7 +9,7 @@ from core.config import ConfigLoader
 from audio.pipeline import AudioManager
 from network.manager import NetworkManager
 from core.engine import AidanCore
-from states.phase_test import PhaseTest
+from states.normal_state import NormalState
 from memory.manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", datefmt="%H:%M:%S")
@@ -44,7 +44,7 @@ async def main():
         logging.info("=== MOTEUR EN LIGNE ===")
         
         # 3. On force l'état initial pour notre test
-        await aidan_core.set_state(PhaseTest())
+        await aidan_core.set_state(NormalState())
         
         # 4. On lance la boucle infinie de l'IA (qui remplace notre ancien 'while True')
         await aidan_core.run_audio_loop()

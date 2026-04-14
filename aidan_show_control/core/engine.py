@@ -68,11 +68,19 @@ class AidanCore:
         while True:
             try:
                 # Étape 1 : Écoute du micro (asynchrone)
+                """
                 audio_file = await self.audio.record_until_silence()
                 if not audio_file:
                     await asyncio.sleep(0.1)
                     continue
-
+                
+                """
+                audio_file = await self.audio.record_ptt() 
+                
+                if not audio_file:
+                    await asyncio.sleep(0.1)
+                    continue
+                
                 # Étape 2 : Transcription (STT)
                 user_text = await self.audio.transcribe(audio_file)
                 if not user_text:
@@ -101,6 +109,7 @@ class AidanCore:
                         f"----------------------------\n"
                         f"Garde ces souvenirs en tête, mais n'y fais référence QUE si c'est pertinent "
                         f"pour répondre à la nouvelle requête de l'utilisateur."
+                        f"Quand tu utilises ces souvenirs, tu peux les refomuler"
                     )
                     logging.info(f"[Core] {len(souvenirs.split('-')) - 1} parts of memory added to the prompt")
                 else:
