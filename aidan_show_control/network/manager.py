@@ -3,6 +3,7 @@ import aiohttp
 import aiomqtt
 from pythonosc import udp_client
 import logging
+import serial
 
 class NetworkManager:
 
@@ -22,6 +23,7 @@ class NetworkManager:
         self.http_session = None
         self.mqtt_client = None # Sera mis à jour dynamiquement
         self.osc_client = udp_client.SimpleUDPClient(self.osc_ip, self.osc_port)
+        #self.ser = serial.Serial('COM6', 115200, timeout=0.1)
         
         # Connexion à LM Studio
         self.lm_is_online = False
@@ -43,6 +45,7 @@ class NetworkManager:
             self.osc_client.send_message(address, value)
         except Exception as e:
             logging.error(f"[OSC] Erreur d'envoi: {e}")
+    
 
 
     async def watchdog_lmstudio(self):
@@ -157,3 +160,5 @@ class NetworkManager:
         except Exception as e:
             logging.error(f"[LM Studio] ❌ Erreur de communication HTTP : {e}")
             return "Oups, j'étais dans les nuages, qu'est ce qui se passait déjà ?"
+        
+    

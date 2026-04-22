@@ -1,7 +1,7 @@
 import logging
-from states.base_state import BaseState # Assure-toi que base_state.py contient bien la classe abstraite
+from states.base_state import PhaseState # Assure-toi que base_state.py contient bien la classe abstraite
 
-class HotState(BaseState):
+class HotState(PhaseState):
     """Phase de test technique pour valider l'architecture."""
 
     async def on_enter(self, core):
@@ -21,7 +21,7 @@ class HotState(BaseState):
                 - Parler toujours en français. 
 
                 Contraintes strictes :
-                - L'utilisateur a bougé la boite à côté de toi, tu es donc énervé
+                - L'utilisateur a bougé la boite à côté de toi, tu es donc très énervé
                 - Tu dois être sarcastique, casssant, énervé, agressif et eventuellement avoir des hallucinations
 
                 Façon de répondre : 

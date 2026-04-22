@@ -10,6 +10,7 @@ from audio.pipeline import AudioManager
 from network.manager import NetworkManager
 from core.engine import AidanCore
 from states.normal_state import NormalState
+from states.hot_state import HotState
 from memory.manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", datefmt="%H:%M:%S")

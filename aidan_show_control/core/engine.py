@@ -40,6 +40,8 @@ class AidanCore:
         # (Utile si une phase spécifique a besoin de réagir à un capteur IoT)
         elif self.current_state and hasattr(self.current_state, 'handle_mqtt'):
             await self.current_state.handle_mqtt(self, topic, payload)
+    
+    
             
     async def process_llm_response(self, raw_text: str):
         """Récupération et analyse des flags"""
@@ -146,3 +148,38 @@ class AidanCore:
             except Exception as e:
                 logging.error(f"[Core] Critical error in audio loop : {e}")
                 await asyncio.sleep(1) # Évite un spam de la console en cas de crash
+        
+        
+        async def force_interaction(self, forced_context: str):
+            """
+            Force l'IA à générer une réponse suite à un événement physique ou un ordre régie,
+            """
+            logging.info(f"[Core] ⚡ Événement injecté : {forced_context}")
+            
+            # 1. On vérifie si la phase doit changer (Ex: On bascule sur HotState)
+            # Assure-toi d'importer HotState en haut de ton fichier !
+            from states.hot_state import HotState
+            await self.set_state(HotState())
+
+            # 2. Récupération du prompt de ce nouvel état (qui est énervé)
+            sys_prompt = self.current_state.get_system_prompt()
+
+            self.network.send_osc("/etat", 2)
+
+            # 3. On injecte l'événement comme si c'était un message utilisateur, 
+            # mais avec une balise pour que l'IA comprenne le contexte.
+            llm_response = await self.network.ask_llm(
+                system_prompt=sys_prompt, 
+                user_text=f"[ÉVÉNEMENT PHYSIQUE] {forced_context}"
+            )
+
+            self.network.send_osc("/etat", 3)
+
+            # 4. Sauvegarde dans la mémoire ChromaDB
+            nouveau_souvenir = f"Événement physique : {forced_context}\nRéaction d'AIDAN : {llm_response}"
+            asyncio.create_task(self.memory.add_memory(text_content=nouveau_souvenir, role="system"))
+
+            # 5. Extraction des flags et TTS (exactement comme le flux normal)
+            await self.process_llm_response(llm_response)
+            
+            self.network.send_osc("/etat", 0)
