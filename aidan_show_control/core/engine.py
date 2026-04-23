@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from utils.text_processing import extract_flags_and_clean
+from states.final_state import FinalState
 
 class AidanCore:
     """Liaision entre audio, réseau et logique de states"""
@@ -99,6 +100,10 @@ class AidanCore:
                     logging.warning("[Core] Message ignored : No active phase")
                     continue
 
+                # Validation de la réponse pour le Quiz ---
+                if isinstance(self.current_state, FinalState):
+                    await self.current_state.handle_response(self, user_text)
+
                 # Étape 3 : Récupération du prompt de la phase actuelle
                 base_sys_prompt = self.current_state.get_system_prompt()
                 
@@ -183,3 +188,19 @@ class AidanCore:
             await self.process_llm_response(llm_response)
             
             self.network.send_osc("/etat", 0)
+
+    # --- Extrait de engine.py ---
+async def process_user_input(self, user_text):
+    # 1. Si on est dans le FinalState, on valide d'abord la réponse
+    if isinstance(self.current_state, FinalState):
+        await self.current_state.handle_response(self, user_text)
+    
+    # 2. On demande au LLM de générer sa réponse (qui contiendra la question suivante)
+    # Le get_system_prompt() sera appelé et contiendra la nouvelle question indexée.
+    response_text = await self.llm.generate(
+        system_prompt=self.current_state.get_system_prompt(),
+        user_input=user_text
+    )
+    
+    # 3. Envoyer au TTS
+    await self.audio.play_tts(response_text)
