@@ -8,6 +8,7 @@ import numpy as np
 import edge_tts
 import uuid
 import keyboard
+import pygame
 from faster_whisper import WhisperModel
 #from mutagen import MP3
 from utils.text_processing import clean_transcription, prepare_tts, sanitize_for_tts, cleanup_old_audio_files
@@ -25,6 +26,9 @@ class AudioManager:
         self.cleanup_age = tts_config.get('audio_cleanup_age', 300)
         
         self.is_speaking = False
+
+        # Initialise le mélangeur audio de pygame
+        pygame.mixer.init()
 
         # Initialisation du modèle Whisper une seule fois au démarrage
         whisper_model_size = audio_config.get('whisper_model_size', "base")
@@ -183,3 +187,28 @@ class AudioManager:
         # Attente arbitraire (idéalement, on calculerait la durée du mp3)
         await asyncio.sleep(0.25) 
         self.is_speaking = False
+
+        # ============================
+    # LECTURE DE FICHIER (MUSIQUE/SONS)
+    # ============================
+    async def play_music_showroom(self, file_path):
+        """Lance la musique de manière robuste via Pygame"""
+        try:
+            if not os.path.exists(file_path):
+                print(f"[Audio] Erreur : Fichier introuvable {file_path}")
+                return
+
+            pygame.mixer.music.load(file_path)
+            pygame.mixer.music.set_volume(0.5) # Volume à 50%
+            pygame.mixer.music.play()
+            print(f"[Audio] Musique en cours de lecture : {file_path}")
+        except Exception as e:
+            print(f"[Audio] Erreur Pygame : {e}")
+
+    async def stop_music_showroom(self):
+        """Arrête la musique en cours via Pygame"""
+        try:
+            pygame.mixer.music.stop()
+            print("[Audio] Musique arrêtée.")
+        except Exception as e:
+            print(f"[Audio] Erreur lors de l'arrêt : {e}")

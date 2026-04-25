@@ -95,6 +95,13 @@ class AidanCore:
                 if not user_text:
                     continue
 
+                is_handled = await self.current_state.handle_response(self, user_text)
+                
+                if is_handled:
+                    logging.info("[Core] Action gérée par l'état. On ignore le LLM pour ce tour.")
+                    self.network.send_osc("/etat", 0) # Remet l'avatar au repos
+                    continue
+
                 # Si on n'a pas encore de phase active (Show pas démarré), on ignore.
                 if not self.current_state:
                     logging.warning("[Core] Message ignored : No active phase")
