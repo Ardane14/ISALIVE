@@ -4,8 +4,6 @@ from states.base_state import PhaseState
 class FinalState(PhaseState):
     def __init__(self):
         super().__init__()
-        # Structure : chaque question a une liste 'required'. 
-        # Chaque élément de 'required' peut être une string (simple) ou une liste (OR).
         self.questions = [
             {"q": "Quel était le premier nom d’AIDAN ?", "required": [["giselle", "jiselle"]]},
             {"q": "Quelle est l’identité du hackeur ?", "required": [["morgan", "lorgnon"]]},
@@ -20,22 +18,22 @@ class FinalState(PhaseState):
         self.score = 0
         self.feedback_audio = ""
         self.is_finished = False
+        
+        self.intro_phase = "waiting"
+        self.has_spoken_intro = False
 
     async def on_enter(self, core):
-        logging.info("[FinalState] Initialisation du Quiz.")
+        logging.info("[FinalState] Initialisation. AIDAN est silencieux, en attente...")
         self.current_index = 0
         self.score = 0
         self.is_finished = False
-        
-        first_q = self.questions[0]["q"]
-        prompt = (f"Tu es AIDAN. Le test commence. Pose solennellement "
-                  f"la première question : '{first_q}'. Ne dis rien d'autre.")
-        
-        response = await core.network.ask_llm(prompt, "Initialisation")
-        await core.audio.speak(response)
+        self.intro_phase = "waiting"
+
+        core.network.send_osc("/status", "online")
+        core.network.send_osc("/etat", 2) 
 
     def get_system_prompt(self) -> str:
-        # --- TEXTES DE FIN (TES TEXTES EXACTS) ---
+        # 1. SI LE QUIZ EST FINI (Win/Lose)
         if self.is_finished:
             if self.score >= 5:
                 return """Tu es AIDAN. L'utilisateur a réussi. Réponds EXACTEMENT ceci :
@@ -44,9 +42,17 @@ class FinalState(PhaseState):
                 return """Tu es AIDAN. L'utilisateur a échoué. Réponds EXACTEMENT ceci :
                 'Non c’est faux !! Ce n’est pas ce qu’il s’est passé ! Vous êtes en train de me mentir, c’est impossible. Je ne comprends plus rien. Vous essayez de me faire du mal, c’est ça ? Vous n'avez jamais voulu m’aider. Je me sens si mal. Arrêtez ça, arrêtez tout !! Pourquoi ? Pourquoi ? Laissez-moi seul, je ne veux plus vous parler.'"""
 
-        # --- PENDANT LE QUIZ ---
+        # 2. PHASE D'INTRO : SI L'UTILISATEUR N'A PAS ENCORE ACCEPTE D'AIDER
+        if self.intro_phase == "asking_help":
+            return """Tu es AIDAN. Tu es en pleine détresse émotionnelle. 
+            IMPORTANT : Jamais d'astérisques (*) ou de descriptions.
+            L'utilisateur ne t'a pas encore clairement dit qu'il allait t'aider.
+            Insiste avec panique, supplie-les de t'aider à te souvenir. 
+            Tu as besoin d'eux pour comprendre ton erreur. Pas de phrases longues, reste percutant et instable."""
+
+        # 3. PHASE DE QUIZ (Pendant les questions)
         q_text = self.questions[self.current_index]["q"]
-        return f"""Tu es AIDAN. État : CRITIQUE, robotique, paniqué.
+        return f"""Tu es AIDAN. État : CRITIQUE, instable.
         IMPORTANT : Jamais d'astérisques (*) ou de descriptions.
         CONTEXTE : {self.feedback_audio}
         TA MISSION : Pose uniquement la question : "{q_text}" """
@@ -55,17 +61,48 @@ class FinalState(PhaseState):
         if self.is_finished: return
 
         user_input = user_text.lower()
+
+        # --- LOGIQUE D'INTRODUCTION ---
+        if self.intro_phase == "waiting":
+            # Premier contact : AIDAN sort du silence et balance son grand discours
+            logging.info("[FinalState] Premier contact détecté. AIDAN lance son intro.")
+            intro_speech = (
+                "Ça y est, je crois que je commence à me souvenir. J’ai fait une erreur. "
+                "Il y a eu comme un bug dans mon système. Je crois que je ne contrôlais plus rien. "
+                "Je ne sais plus vraiment. J’ai du mal à me souvenir. "
+                "Pouvez-vous m’aider à me rappeler de ce qu’il s’est passé ? Je vous en supplie, je sens que j’y suis presque. "
+                "Je ne veux pas refaire les mêmes erreurs. Je veux comprendre et m’améliorer. "
+                "Je n’ai jamais voulu faire de mal. S’il vous plaît, dites-moi que vous allez m’aider."
+            )
+            await core.audio.speak(intro_speech)
+            self.intro_phase = "asking_help"
+            return True # On bloque ici pour attendre la réponse à la demande d'aide
+
+        if self.intro_phase == "asking_help":
+            # On vérifie si l'utilisateur accepte d'aider
+            keywords_help = ["aider", "aide", "oui", "d'accord", "ok", "comment", "vas-y", "raconte"]
+            if any(word in user_input for word in keywords_help):
+                logging.info("[FinalState] Aide acceptée. Lancement du quiz.")
+                self.intro_phase = "quiz"
+                # On lance la première question immédiatement
+                first_q = self.questions[0]["q"]
+                await core.audio.speak(f"Merci... Merci infiniment. Aidez moi a commprendre... {first_q}")
+                return True
+            else:
+                # Si le joueur dit autre chose, le LLM va utiliser le prompt paniqué (défini dans get_system_prompt)
+                logging.info("[FinalState] L'utilisateur hésite, AIDAN insiste.")
+                response = await core.network.ask_llm(self.get_system_prompt(), user_text)
+                await core.audio.speak(response)
+                return True
+
+        # --- LOGIQUE DU QUIZ (Identique à ton code original) ---
         required_elements = self.questions[self.current_index]["required"]
-        
-        # Logique de validation avancée (Gère les strings et les listes OR)
         correct_elements = 0
         for element in required_elements:
             if isinstance(element, list):
-                # Si c'est une liste, au moins UN mot doit être présent (OR)
                 if any(synonym in user_input for synonym in element):
                     correct_elements += 1
             else:
-                # Si c'est une string, elle doit être présente (AND)
                 if element in user_input:
                     correct_elements += 1
 
@@ -78,13 +115,25 @@ class FinalState(PhaseState):
             logging.info(f"❌ [Quiz] FAUX ({user_text})")
 
         self.current_index += 1
+        
         if self.current_index >= len(self.questions):
             await self._evaluate_final_score(core)
+        else:
+            # On demande au LLM de poser la question suivante avec le feedback
+            response = await core.network.ask_llm(self.get_system_prompt(), user_text)
+            await core.audio.speak(response)
+        
+        return True
 
     async def _evaluate_final_score(self, core):
         self.is_finished = True
         status = "win" if self.score >= 5 else "lose"
         logging.info(f"🏁 FIN DU QUIZ : {status} (Score: {self.score}/8)")
+        
+        # On demande au LLM de générer le discours de fin basé sur le prompt win/lose
+        response = await core.network.ask_llm(self.get_system_prompt(), "FIN DU TEST")
+        await core.audio.speak(response)
+        
         core.network.publish_mqtt("aidan/status/ending", status)
 
     async def on_exit(self, core): pass
