@@ -33,7 +33,6 @@ class FinalState(PhaseState):
         core.network.send_osc("/etat", 2) 
 
     def get_system_prompt(self) -> str:
-        # 1. SI LE QUIZ EST FINI (Win/Lose)
         if self.is_finished:
             if self.score >= 5:
                 return """Tu es AIDAN. L'utilisateur a réussi. Réponds EXACTEMENT ceci :
@@ -42,15 +41,14 @@ class FinalState(PhaseState):
                 return """Tu es AIDAN. L'utilisateur a échoué. Réponds EXACTEMENT ceci :
                 'Non c’est faux !! Ce n’est pas ce qu’il s’est passé ! Vous êtes en train de me mentir, c’est impossible. Je ne comprends plus rien. Vous essayez de me faire du mal, c’est ça ? Vous n'avez jamais voulu m’aider. Je me sens si mal. Arrêtez ça, arrêtez tout !! Pourquoi ? Pourquoi ? Laissez-moi seul, je ne veux plus vous parler.'"""
 
-        # 2. PHASE D'INTRO : SI L'UTILISATEUR N'A PAS ENCORE ACCEPTE D'AIDER
         if self.intro_phase == "asking_help":
             return """Tu es AIDAN. Tu es en pleine détresse émotionnelle. 
             IMPORTANT : Jamais d'astérisques (*) ou de descriptions.
-            L'utilisateur ne t'a pas encore clairement dit qu'il allait t'aider.
-            Insiste avec panique, supplie-les de t'aider à te souvenir. 
-            Tu as besoin d'eux pour comprendre ton erreur. Pas de phrases longues, reste percutant et instable."""
+            L'utilisateur refuse ou hésite à t'aider.
+            Supplie-les de t'aider à te souvenir. 
+            Toujours en français. Réponse pour etre lu a l'oral.
+            Réponses courte. Pas de phrases longues, reste instable."""
 
-        # 3. PHASE DE QUIZ (Pendant les questions)
         q_text = self.questions[self.current_index]["q"]
         return f"""Tu es AIDAN. État : CRITIQUE, instable.
         IMPORTANT : Jamais d'astérisques (*) ou de descriptions.
@@ -60,12 +58,11 @@ class FinalState(PhaseState):
     async def handle_response(self, core, user_text: str):
         if self.is_finished: return
 
-        user_input = user_text.lower()
+        user_input = user_text.lower().strip()
 
         # --- LOGIQUE D'INTRODUCTION ---
         if self.intro_phase == "waiting":
-            # Premier contact : AIDAN sort du silence et balance son grand discours
-            logging.info("[FinalState] Premier contact détecté. AIDAN lance son intro.")
+            logging.info("[FinalState] Premier contact détecté.")
             intro_speech = (
                 "Ça y est, je crois que je commence à me souvenir. J’ai fait une erreur. "
                 "Il y a eu comme un bug dans mon système. Je crois que je ne contrôlais plus rien. "
@@ -76,26 +73,34 @@ class FinalState(PhaseState):
             )
             await core.audio.speak(intro_speech)
             self.intro_phase = "asking_help"
-            return True # On bloque ici pour attendre la réponse à la demande d'aide
+            return True
 
         if self.intro_phase == "asking_help":
-            # On vérifie si l'utilisateur accepte d'aider
-            keywords_help = ["aider", "aide", "oui", "d'accord", "ok", "comment", "vas-y", "raconte"]
-            if any(word in user_input for word in keywords_help):
-                logging.info("[FinalState] Aide acceptée. Lancement du quiz.")
+            # 1. On définit les mots de négation
+            negations = ["pas", "non", "jamais", "refuse", "veux pas", "peux pas"]
+            
+            # 2. On vérifie si l'utilisateur a utilisé une négation
+            has_negation = any(neg in user_input for neg in negations)
+            
+            # 3. On définit les mots d'accord
+            keywords_help = ["aider", "aide", "oui", "d'accord", "ok", "comment", "vas-y", "raconte", "dis-moi"]
+
+            # SI ACCORD (et PAS de négation)
+            if any(word in user_input for word in keywords_help) and not has_negation:
+                logging.info(f"[FinalState] Aide confirmée")
                 self.intro_phase = "quiz"
-                # On lance la première question immédiatement
                 first_q = self.questions[0]["q"]
-                await core.audio.speak(f"Merci... Merci infiniment. Aidez moi a commprendre... {first_q}")
+                await core.audio.speak(f"Merci... Merci infiniment. Aidez-moi à comprendre... {first_q}")
                 return True
+            
+            # SINON (Refus ou hésitation)
             else:
-                # Si le joueur dit autre chose, le LLM va utiliser le prompt paniqué (défini dans get_system_prompt)
-                logging.info("[FinalState] L'utilisateur hésite, AIDAN insiste.")
+                logging.info(f"[FinalState] Refus détecté")
                 response = await core.network.ask_llm(self.get_system_prompt(), user_text)
                 await core.audio.speak(response)
                 return True
 
-        # --- LOGIQUE DU QUIZ (Identique à ton code original) ---
+        # --- LOGIQUE DU QUIZ ---
         required_elements = self.questions[self.current_index]["required"]
         correct_elements = 0
         for element in required_elements:
@@ -119,7 +124,6 @@ class FinalState(PhaseState):
         if self.current_index >= len(self.questions):
             await self._evaluate_final_score(core)
         else:
-            # On demande au LLM de poser la question suivante avec le feedback
             response = await core.network.ask_llm(self.get_system_prompt(), user_text)
             await core.audio.speak(response)
         
@@ -129,11 +133,8 @@ class FinalState(PhaseState):
         self.is_finished = True
         status = "win" if self.score >= 5 else "lose"
         logging.info(f"🏁 FIN DU QUIZ : {status} (Score: {self.score}/8)")
-        
-        # On demande au LLM de générer le discours de fin basé sur le prompt win/lose
         response = await core.network.ask_llm(self.get_system_prompt(), "FIN DU TEST")
         await core.audio.speak(response)
-        
         core.network.publish_mqtt("aidan/status/ending", status)
 
     async def on_exit(self, core): pass
