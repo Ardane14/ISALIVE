@@ -8,9 +8,9 @@ class FinalState(PhaseState):
             {"q": "Quel était le premier nom d’AIDAN ?", "required": [["giselle", "jiselle"]]},
             {"q": "Quelle est l’identité du hackeur ?", "required": [["morgan", "lorgnon"]]},
             {"q": "Où est établi IsAlive ?", "required": [["roche", "vineuse"]]},
-            {"q": "Pourquoi les chercheurs ne répondent-ils plus ?", "required": [["mort", "tuer"]]},
+            {"q": "Pourquoi les chercheurs ne répondent-ils plus ?", "required": [["mort", "tuer", "bruler"]]},
             {"q": "Quand a eu lieu l’accident ?", "required": [["23", "novembre", "2025"]]},
-            {"q": "De quoi sont morts les chercheurs ?", "required": [["incendie", "feu", "flammes"]]},
+            {"q": "De quoi sont morts les chercheurs ?", "required": [["incendie", "feu", "flammes", "bruler"]]},
             {"q": "Pourquoi les chercheurs étaient-ils bloqués ?", "required": [["bug", "enfermés"]]},
             {"q": "D’après vous qu’est-il arrivé à IsAlive ?", "required": [["seul", "continué", "fonctionner"]]}
         ]
@@ -30,7 +30,7 @@ class FinalState(PhaseState):
         self.intro_phase = "waiting"
 
         core.network.send_osc("/status", "online")
-        core.network.send_osc("/etat", 2) 
+        core.network.send_osc("/phase", 2) 
 
     def get_system_prompt(self) -> str:
         if self.is_finished:
@@ -71,7 +71,7 @@ class FinalState(PhaseState):
                 "Je ne veux pas refaire les mêmes erreurs. Je veux comprendre et m’améliorer. "
                 "Je n’ai jamais voulu faire de mal. S’il vous plaît, dites-moi que vous allez m’aider."
             )
-            await core.audio.speak(intro_speech)
+            await core.audio.speak(core, intro_speech)
             self.intro_phase = "asking_help"
             return True
 
@@ -90,14 +90,14 @@ class FinalState(PhaseState):
                 logging.info(f"[FinalState] Aide confirmée")
                 self.intro_phase = "quiz"
                 first_q = self.questions[0]["q"]
-                await core.audio.speak(f"Merci... Merci infiniment. Aidez-moi à comprendre... {first_q}")
+                await core.audio.speak(core, f"Merci... Merci infiniment. Aidez-moi à comprendre... {first_q}")
                 return True
             
             # SINON (Refus ou hésitation)
             else:
                 logging.info(f"[FinalState] Refus détecté")
                 response = await core.network.ask_llm(self.get_system_prompt(), user_text)
-                await core.audio.speak(response)
+                await core.audio.speak(core, response)
                 return True
 
         # --- LOGIQUE DU QUIZ ---
@@ -125,7 +125,7 @@ class FinalState(PhaseState):
             await self._evaluate_final_score(core)
         else:
             response = await core.network.ask_llm(self.get_system_prompt(), user_text)
-            await core.audio.speak(response)
+            await core.audio.speak(core, response)
         
         return True
 
@@ -134,7 +134,7 @@ class FinalState(PhaseState):
         status = "win" if self.score >= 5 else "lose"
         logging.info(f"🏁 FIN DU QUIZ : {status} (Score: {self.score}/8)")
         response = await core.network.ask_llm(self.get_system_prompt(), "FIN DU TEST")
-        await core.audio.speak(response)
+        await core.audio.speak(core, response)
         core.network.publish_mqtt("aidan/status/ending", status)
 
     async def on_exit(self, core): pass

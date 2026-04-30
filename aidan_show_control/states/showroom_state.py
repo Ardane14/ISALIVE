@@ -1,23 +1,41 @@
+import asyncio
 import logging
 import os
-import subprocess
 from states.base_state import PhaseState
 
 class ShowroomState(PhaseState):
     def __init__(self):
         super().__init__()
         self.intro_done = False
-        # On définit le chemin une seule fois proprement
+        self.hacker_played = False
         root_path = os.getcwd()
         self.music_path = os.path.join(root_path, "audio", "showroom", "Fivefold.mp3")
+        self.hacker_audio_path = os.path.join(root_path, "audio", "showroom", "Hacker.mp3")
+        self.timer_task = None
+
+    async def _auto_play_hacker(self, core):
+        """Attends 1 minute puis lance l'audio hacker SANS BOUCLER."""
+        await asyncio.sleep(60)
+        
+        if os.path.exists(self.hacker_audio_path):
+            logging.info("[ShowroomState] Lancement de hacker.mp3 (lecture unique)")
+            await core.audio.play_music_showroom(self.hacker_audio_path, loop=False)
+        else:
+            logging.error(f"[ShowroomState] Fichier introuvable : {self.hacker_audio_path}")
 
     async def on_enter(self, core):
         logging.info(f"[ShowroomState] Entrée. Check musique: {self.music_path}")
-        core.network.send_osc("/avatar/mood", "happy")
+        
+        # Signaux OSC
+        core.network.send_osc("/status", "online")
+        core.network.send_osc("/phase", 0)
+        
+        # Lancement du timer de 2 minutes en arrière-plan
+        self.timer_task = asyncio.create_task(self._auto_play_hacker(core))
         
         if not self.intro_done:
             welcome = "Bienvenue dans le showroom ISALIVE. Je suis AIDAN votre Assistant Intelligent Domestique Adaptatif Neuronal. Pour vous servir"
-            await core.audio.speak(welcome)
+            await core.audio.speak(core, welcome)
             self.intro_done = True
 
     def get_system_prompt(self) -> str:
@@ -27,7 +45,7 @@ class ShowroomState(PhaseState):
             RÈGLES :
             1. RÉPONDS UNIQUEMENT À LA QUESTION POSÉE.
             2. Tes réponses doivent faire 1 ou 2 phrases maximum.
-            3. Météo : 7°C, ressenti 5, vents 22km/h, neige fondante matin, pluie après-midi.
+            3. Météo : 7°C, ressenti 5, vents 22 kilomètre heure, neige fondante matin, pluie après-midi.
             4. Ne décris jamais tes actions avec des astérisques. Pas d'emojis."""
         )
 
@@ -37,20 +55,23 @@ class ShowroomState(PhaseState):
         # 1. ON VÉRIFIE L'ARRÊT EN PREMIER
         if any(word in user_input for word in ["stope", "arrête", "coupe", "éteins", "stop"]):
             print(f"--- [DEBUG] Commande d'ARRÊT détectée ---")
-            
             await core.audio.stop_music_showroom()
-            await core.audio.speak("Désolé, je n'ai pas encore accès à un plus grand répertoire, je ne suis qu'un prototype.")
+            await core.audio.speak(core, "Désolé, je n'ai pas encore accès à un plus grand répertoire, je ne suis qu'un prototype.")
             return True
 
         # 2. ON VÉRIFIE LE LANCEMENT EN DEUXIÈME
         if any(word in user_input for word in ["musique", "joue", "mélodie", "ambiance", "allume"]):
             print(f"--- [DEBUG] Commande de LANCEMENT détectée ---")
-            
             await core.audio.play_music_showroom(self.music_path)
-            await core.audio.speak("Certainement. Je lance l'ambiance sonore immédiatement.")
+            await core.audio.speak(core, "Certainement. Je lance l'ambiance sonore immédiatement.")
             return True 
 
         return False 
 
-    async def on_exit(self, core): pass
+    async def on_exit(self, core):
+        # Très important : on annule le timer si on quitte l'état avant les 2 minutes
+        if self.timer_task:
+            self.timer_task.cancel()
+            logging.info("[ShowroomState] Timer hacker annulé (sortie de l'état).")
+
     async def handle_flag(self, core, flag: str): pass
