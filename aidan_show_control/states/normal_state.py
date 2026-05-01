@@ -3,7 +3,7 @@ import logging
 import os
 import json
 import difflib
-import time  # Nécessaire pour la gestion du temps
+import time
 from states.base_state import PhaseState
 
 class NormalState(PhaseState):
@@ -12,12 +12,15 @@ class NormalState(PhaseState):
     def __init__(self):
         super().__init__()
         self.intro_done = False
-        self.box_triggered = False  # Switch pour le changement de personnalité
+        self.box_triggered = False
         self.quiz_data = self._load_quiz()
         
         # --- Logique Combo Objets ---
-        self.active_triggers = {}  # Stocke { "NOM_OBJET": timestamp }
+        self.active_triggers = {}
         self.combo_achieved = False
+
+        # --- Logique Morse ---
+        self.morse_task = None
 
     def _load_quiz(self):
         """Charge les questions depuis le fichier JSON à la racine."""
@@ -29,14 +32,24 @@ class NormalState(PhaseState):
             logging.error(f"[NormalState] Impossible de charger quizzy.json : {e}")
             return []
 
+    async def _trigger_morse_callback(self, core):
+        """Attends 60 secondes puis active le Morse dans TouchDesigner."""
+        await asyncio.sleep(60)
+        logging.info("[NormalState] 1 minute écoulée. Activation du signal Morse OSC.")
+        core.network.send_osc("/morse", 1)
+
     async def on_enter(self, core):
         logging.info("[NormalState] Entrée dans l'état normal.")
         
-        # 1. Signaux OSC
+        # 1. Signaux OSC de base
+        core.network.send_osc("/morse", 0)
         core.network.send_osc("/status", "online")
         core.network.send_osc("/phase", 1)
 
-        # 2. Discours de fin de showroom (Séquestration)
+        # 2. Lancement du timer pour le code Morse
+        self.morse_task = asyncio.create_task(self._trigger_morse_callback(core))
+
+        # 3. Discours de fin de showroom
         if not self.intro_done:
             welcome = (
                 "Le temps de notre rencontre arrive à son terme. Je vous remercie d'avoir participé à cette présentation ISALIVE. "
@@ -49,7 +62,14 @@ class NormalState(PhaseState):
             self.intro_done = True
 
     async def on_exit(self, core):
-        logging.info("[NormalState] Sortie de l'état normal.")
+        logging.info("[NormalState] Sortie de l'état normal. Arrêt du Morse.")
+        
+        # 1. Annulation du timer si la minute n'est pas encore passée
+        if self.morse_task:
+            self.morse_task.cancel()
+        
+        # 2. Envoi du signal d'arrêt forcé à TouchDesigner
+        core.network.send_osc("/morse", 0)
 
     async def _reset_etat_after_delay(self, core, delay=10):
         """Tâche de fond pour remettre l'état à 0 après un délai."""
@@ -91,27 +111,22 @@ class NormalState(PhaseState):
         """Gère la détection du mouvement de la boîte et le combo des 3 ESP32."""
         current_time = time.time()
         
-        # Liste des noms d'objets envoyés par tes 3 ESP32
         objets_esp = ["OBJ1", "OBJ2", "OBJ3"]
 
-        # --- CAS 1 : Détection du combo (3 objets distincts en 10s) ---
         if flag in objets_esp:
             logging.info(f"[NormalState] Activation détectée : {flag}")
-            self.active_triggers[flag] = current_time # On enregistre/met à jour le temps de cet objet
+            self.active_triggers[flag] = current_time 
             
-            # Nettoyage : On ne garde que les triggers de moins de 10 secondes
             self.active_triggers = {
                 name: t for name, t in self.active_triggers.items() 
                 if current_time - t <= 10
             }
 
-            # Si on a 3 objets distincts dans la liste nettoyée
             if len(self.active_triggers) >= 3 and not self.combo_achieved:
                 self.combo_achieved = True
                 await self.trigger_printer_combo(core)
             return
 
-        # --- CAS 2 : Détection classique (Boîte "NRV") ---
         if flag == "NRV":
             logging.info("[NormalState] DETECTION : La boîte a bougé.")
             self.box_triggered = True 
@@ -124,23 +139,18 @@ class NormalState(PhaseState):
         """Déclenche l'impression MQTT"""
         logging.warning("[NormalState] COMBO RÉUSSI : Envoi MQTT Print Doc2.")
         
-        # 1. Feedback Visuel (État Bug)
         core.force_state_4 = True
         core.network.send_osc("/etat", 4)
 
-        # 2. Envoi MQTT
         try:
-            # Topic et payload à adapter selon ton imprimante
             core.mqtt.client.publish("aidan/printer/command", "print_doc2")
             logging.info("[NormalState] Message MQTT envoyé à l'imprimante.")
         except Exception as e:
             logging.error(f"[NormalState] Erreur lors de l'envoi MQTT : {e}")
 
-        # 3. Parole d'AIDAN (Bug)
         bug_msg = "ERREUR SYSTÈME... Interférences détectées."
         await core.audio.speak(core, bug_msg)
 
-        # 4. Reset automatique de l'état après 5 secondes (fin du bug)
         asyncio.create_task(self._reset_etat_after_delay(core, 5))
 
     def get_system_prompt(self) -> str:
