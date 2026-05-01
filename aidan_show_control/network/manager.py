@@ -3,162 +3,100 @@ import aiohttp
 import aiomqtt
 from pythonosc import udp_client
 import logging
-import serial
+import json
 
 class NetworkManager:
-
     def __init__(self, network_config: dict, lm_config: dict):
-        # Configuration (identique à l'étape précédente)
-        self.mqtt_broker = network_config.get('mqtt_broker', '127.0.0.1')
+        self.mqtt_broker = network_config.get('mqtt_broker', '192.168.0.10')
         self.mqtt_port = network_config.get('mqtt_port', 1883)
         self.osc_ip = network_config.get('osc_ip_av', '127.0.0.1')
         self.osc_port = network_config.get('osc_port_av', 8000)
         self.lm_url = lm_config.get('url', 'http://127.0.0.1:1234/v1/chat/completions')
         
-        # Base URL pour le ping de santé de LM Studio (API OpenAI like)
         self.lm_health_url = self.lm_url.replace("/chat/completions", "/models")
         self.lm_timeout = lm_config.get('timeout_seconds', 5.0)
 
-        # Clients
         self.http_session = None
-        self.mqtt_client = None # Sera mis à jour dynamiquement
+        self.mqtt_client = None 
         self.osc_client = udp_client.SimpleUDPClient(self.osc_ip, self.osc_port)
-        #self.ser = serial.Serial('COM6', 115200, timeout=0.1)
-        
-        # Connexion à LM Studio
         self.lm_is_online = False
 
     async def connect_http(self):
-        """HTTP OPENING."""
         self.http_session = aiohttp.ClientSession()
         logging.info("[Network] Session HTTP ouverte.")
 
     async def close_all(self):
-        """HTTP CLOSING."""
         if self.http_session:
             await self.http_session.close()
 
-
     def send_osc(self, address: str, value):
-        """OSC SENDING TO TOUCHDESIGNER"""
         try:
             self.osc_client.send_message(address, value)
         except Exception as e:
-            logging.error(f"[OSC] Erreur d'envoi: {e}")
-    
-
+            logging.error(f"[OSC] Erreur: {e}")
 
     async def watchdog_lmstudio(self):
-        """Verifying if LM Studio IS ALIVE (nom du projet tu connais)"""
         while True:
             try:
                 async with self.http_session.get(self.lm_health_url, timeout=2.0) as response:
                     if response.status == 200:
                         if not self.lm_is_online:
-                            logging.info("[Watchdog] LM Studio pinged")
+                            logging.info("[Watchdog] LM Studio Online")
                             self.lm_is_online = True
-                    else:
-                        raise Exception("Code HTTP inattendu")
+                    else: raise Exception()
             except Exception:
                 if self.lm_is_online:
-                    logging.error("[Watchdog] LM Studio didn't pinged")
+                    logging.error("[Watchdog] LM Studio Offline")
                     self.lm_is_online = False
-            
             await asyncio.sleep(5)
 
-
     async def listen_mqtt(self, on_message_callback):
-        """
-        MQTT : Protocole entre Régie (Chataigne) et AIDAN.
-        Écoute MQTT avec reconnexion automatique.
-        Envoie du message reçu au core de AIDAN  
-        """
         reconnect_interval = 2
-
         while True:
             try:
-                logging.info(f"[MQTT] Trying to connect to {self.mqtt_broker}:{self.mqtt_port}...")
-                
                 async with aiomqtt.Client(self.mqtt_broker, port=self.mqtt_port) as client:
-                    logging.info("[MQTT] Régie connectée")
-                    self.mqtt_client = client # Instanciation du client pour l'utiliser et publier en MQTT
-                    
-                    # Abonnement aux topics de contrôle venant de Chataigne
+                    logging.info("[MQTT] Connecté au Broker")
+                    self.mqtt_client = client 
                     await client.subscribe("aidan/control/#")
-                    
-                    # Boucle d'écoute asynchrone
                     async for message in client.messages:
                         topic = message.topic.value
                         payload = message.payload.decode('utf-8')
-                        print(f"[MQTT IN] {topic} : {payload}")
-                        
-                        # Envoi du message au core de AIDAN
                         await on_message_callback(topic, payload)
-
-            except aiomqtt.MqttError as error:
-                logging.warning(f"[MQTT] Disconnected : {error}. Reconnection in {reconnect_interval}s...")
+            except aiomqtt.MqttError:
                 self.mqtt_client = None
                 await asyncio.sleep(reconnect_interval)
-            except asyncio.CancelledError:
-                break
 
-    # ============================
-    # PUBLICATION MQTT
-    # ============================
-    async def publish_mqtt(self, topic: str, payload: str):
-        """
-        MQTT : Protocole entre Régie (Chataigne) et AIDAN.
-        Publication MQTT avec gestion d'erreur.
-        Si le client MQTT n'est pas connecté, on loggue un warning.
-        """
+    # --- MÉTHODE BIEN INDENTÉE ---
+    async def publish_mqtt(self, topic: str, payload):
+        """Publie un message. Gère dict, list et string automatiquement."""
         if self.mqtt_client is not None:
             try:
-                await self.mqtt_client.publish(topic, payload=payload)
-
-            except aiomqtt.MqttError as e:
-                logging.error(f"[MQTT] Can't publish {topic}: {e}")
+                if isinstance(payload, (dict, list)):
+                    payload = json.dumps(payload)
+                elif not isinstance(payload, str):
+                    payload = str(payload)
+                
+                await self.mqtt_client.publish(topic, payload=payload, retain=True)
+                logging.info(f"[MQTT OUT] {topic} : {payload}")
+            except Exception as e:
+                logging.error(f"[MQTT] Erreur publication: {e}")
         else:
-            logging.warning(f"[MQTT] Publish failed ({topic}), broker disconnected.")
+            logging.warning(f"[MQTT] Non connecté, échec sur : {topic}")
 
-            
     async def ask_llm(self, system_prompt: str, user_text: str) -> str:
-        """
-        Requête à LM Stuio
-        """
-        if not self.http_session:
-            logging.error("[Network] LM studio request failed: HTTP session not initialized.")
-            return ""
-
-        logging.info("[Network] AIDAN réfléchit ...")
-        
+        if not self.http_session: return ""
         payload = {
-            "model": "local-model", # LM Studio se base sur le modèle chargé en RAM, ce nom importe peu
+            "model": "local-model",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text}
             ],
             "max_tokens": 2048
         }
-
         try:
             timeout = aiohttp.ClientTimeout(total=self.lm_timeout)
-            
-            async with self.http_session.post(self.lm_url, json=payload, timeout=timeout) as response:
-                response.raise_for_status() # Déclenche une erreur si le statut HTTP n'est pas 200 OK
-                data = await response.json()
-                
-                answer = data["choices"][0]["message"]["content"]
-                logging.info(f"[LM Studio] AIDAN send the answer with ({len(answer)} characters).")
-                return answer
-
-        except asyncio.TimeoutError:
-            logging.error(f"[LM Studio] TIMEOUT : AIDAN n'a pas répondu dans les {self.lm_timeout}s imparties !")
-            # En Live, il vaut mieux que l'avatar dise une phrase d'attente/erreur cohérente
-            # plutôt que de rester muet ou de planter.
-            return "Désolé, j'ai eu un petit trou de mémoire. Peux-tu répéter ?"
-            
-        except Exception as e:
-            logging.error(f"[LM Studio] ❌ Erreur de communication HTTP : {e}")
-            return "Oups, j'étais dans les nuages, qu'est ce qui se passait déjà ?"
-        
-    
+            async with self.http_session.post(self.lm_url, json=payload, timeout=timeout) as resp:
+                data = await resp.json()
+                return data["choices"][0]["message"]["content"]
+        except Exception:
+            return "Désolé, j'ai eu un petit problème de connexion."

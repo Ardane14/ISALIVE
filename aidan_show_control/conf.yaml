@@ -3,9 +3,9 @@
 # ==========================================
 
 network:
-  mqtt_broker: "127.0.0.1"
+  mqtt_broker: "192.168.0.10"
   mqtt_port: 1883
-  osc_ip_av: "127.0.0.1"
+  osc_ip_av: "192.168.0.10"
   osc_port_av: 7000
 
 lm_studio:

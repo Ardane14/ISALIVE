@@ -111,7 +111,7 @@ class NormalState(PhaseState):
         """Gère la détection du mouvement de la boîte et le combo des 3 ESP32."""
         current_time = time.time()
         
-        objets_esp = ["OBJ1", "OBJ2", "OBJ3"]
+        objets_esp = ["object1", "object2", "object3"]
 
         if flag in objets_esp:
             logging.info(f"[NormalState] Activation détectée : {flag}")
