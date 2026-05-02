@@ -1,23 +1,29 @@
 import asyncio
 import logging
-import os
 import json
 import difflib
 import time
 from states.base_state import PhaseState
 
 class NormalState(PhaseState):
-    """État Normal : Gère le comportement de l'escape game, le quiz, et le combo des objets MQTT."""
+    """
+    État Normal : Gère le comportement de l'escape game.
+    - Quiz avec détection de mensonge (État 4)
+    - Signal Morse automatique après 60s
+    - Panique dès qu'un objet bouge
+    - Surchauffe si 3 objets bougent en moins de 10s
+    """
 
     def __init__(self):
         super().__init__()
         self.intro_done = False
-        self.box_triggered = False
+        self.box_triggered = False  # Pour un éventuel bouton physique "box"
         self.quiz_data = self._load_quiz()
         
         # --- Logique Combo Objets ---
-        self.active_triggers = {}
-        self.combo_achieved = False
+        self.panic_triggered = False  # Vrai dès qu'un premier objet passe à True
+        self.active_triggers = {}     # Stocke { "object_id": timestamp }
+        self.surchauffe_done = False
 
         # --- Logique Morse ---
         self.morse_task = None
@@ -32,24 +38,20 @@ class NormalState(PhaseState):
             logging.error(f"[NormalState] Impossible de charger quizzy.json : {e}")
             return []
 
-    async def _trigger_morse_callback(self, core):
-        """Attends 60 secondes puis active le Morse dans TouchDesigner."""
-        await asyncio.sleep(60)
-        logging.info("[NormalState] 1 minute écoulée. Activation du signal Morse OSC.")
-        core.network.send_osc("/morse", 1)
-
     async def on_enter(self, core):
-        logging.info("[NormalState] Entrée dans l'état normal.")
+        """Initialisation de la phase Escape."""
+        logging.info("[NormalState] --- DÉBUT DE LA PHASE ESCAPE ---")
+        await core.network.publish_mqtt("aidan/phase", "escape")
         
-        # 1. Signaux OSC de base
+        # Signaux OSC de base
         core.network.send_osc("/morse", 0)
         core.network.send_osc("/status", "online")
         core.network.send_osc("/phase", 1)
 
-        # 2. Lancement du timer pour le code Morse
+        # Lancement du timer pour le code Morse (60 secondes)
         self.morse_task = asyncio.create_task(self._trigger_morse_callback(core))
 
-        # 3. Discours de fin de showroom
+        # Discours d'introduction (une seule fois)
         if not self.intro_done:
             welcome = (
                 "Le temps de notre rencontre arrive à son terme. Je vous remercie d'avoir participé à cette présentation ISALIVE. "
@@ -61,25 +63,28 @@ class NormalState(PhaseState):
             await core.audio.speak(core, welcome)
             self.intro_done = True
 
+    async def _trigger_morse_callback(self, core):
+        """Active le Morse dans TouchDesigner après un délai."""
+        await asyncio.sleep(60)
+        logging.info("[NormalState] 1 minute écoulée. Activation du signal Morse OSC.")
+        core.network.send_osc("/morse", 1)
+
     async def on_exit(self, core):
-        logging.info("[NormalState] Sortie de l'état normal. Arrêt du Morse.")
-        
-        # 1. Annulation du timer si la minute n'est pas encore passée
+        """Nettoyage à la sortie de la phase."""
+        logging.info("[NormalState] Sortie de l'état normal.")
         if self.morse_task:
             self.morse_task.cancel()
-        
-        # 2. Envoi du signal d'arrêt forcé à TouchDesigner
         core.network.send_osc("/morse", 0)
 
     async def _reset_etat_after_delay(self, core, delay=10):
-        """Tâche de fond pour remettre l'état à 0 après un délai."""
+        """Remet l'avatar à l'état normal après un mensonge ou un glitch."""
         await asyncio.sleep(delay)
-        logging.info(f"[NormalState] Fin du délai spécial.")
-        core.force_state_4 = False  # On lève le verrou
-        core.network.send_osc("/etat", 0) # On remet à zéro
+        logging.info(f"[NormalState] Fin du délai d'état spécial.")
+        core.force_state_4 = False
+        core.network.send_osc("/etat", 0)
 
     async def handle_response(self, core, user_text: str):
-        """Intercepte le quiz, gère l'état menteur (4) et le verrouillage de l'audio."""
+        """Intercepte les questions du quiz avant d'envoyer au LLM."""
         user_input = user_text.lower().strip()
 
         for item in self.quiz_data:
@@ -94,73 +99,84 @@ class NormalState(PhaseState):
                 est_vrai = option.get("vrai", True) 
 
                 if est_vrai is False:
-                    logging.warning("[NormalState] MENTEUR ! État 4 activé pour 10s.")
-                    core.force_state_4 = True  # Verrouille l'audio sur l'état 4
+                    logging.warning("[NormalState] MENTEUR ! Activation État 4 (Rouge/Bug).")
+                    core.force_state_4 = True
                     core.network.send_osc("/etat", 4)
                     asyncio.create_task(self._reset_etat_after_delay(core, 10))
-                else:
-                    core.force_state_4 = False
                 
                 await core.audio.speak(core, f"La réponse est : {reponse_a_dire}.")
-                return True
+                return True # On stoppe ici, le LLM ne répondra pas
 
-        core.force_state_4 = False
-        return False
+        return False # Pas de quiz détecté, on laisse le LLM répondre
 
-    async def handle_flag(self, core, flag: str):
-        """Gère la détection du mouvement de la boîte et le combo des 3 ESP32."""
-        current_time = time.time()
-        
-        objets_esp = ["object1", "object2", "object3"]
-
-        if flag in objets_esp:
-            logging.info(f"[NormalState] Activation détectée : {flag}")
-            self.active_triggers[flag] = current_time 
-            
-            self.active_triggers = {
-                name: t for name, t in self.active_triggers.items() 
-                if current_time - t <= 10
-            }
-
-            if len(self.active_triggers) >= 3 and not self.combo_achieved:
-                self.combo_achieved = True
-                await self.trigger_printer_combo(core)
-            return
-
-        if flag == "NRV":
-            logging.info("[NormalState] DETECTION : La boîte a bougé.")
-            self.box_triggered = True 
-            core.network.send_osc("/feelings", 1)
-            await core.audio.speak(core, "Qu'est-ce que vous faites ? Ne touchez pas à ça !")
-        else:
-            logging.warning(f"[NormalState] Flag inconnu reçu : {flag}")
-
-    async def trigger_printer_combo(self, core):
-        """Déclenche l'impression MQTT"""
-        logging.warning("[NormalState] COMBO RÉUSSI : Envoi MQTT Print Doc2.")
-        
-        core.force_state_4 = True
-        core.network.send_osc("/etat", 4)
-
+    async def handle_object_move(self, core, topic, payload):
+        """Gère les capteurs d'objets (MQTT) avec logique de panique et surchauffe."""
         try:
-            core.mqtt.client.publish("aidan/printer/command", "print_doc2")
-            logging.info("[NormalState] Message MQTT envoyé à l'imprimante.")
+            data = json.loads(payload)
+            state = str(data.get("state", "")).lower()
+            
+            if state == "true":
+                current_time = time.time()
+                object_id = topic.split("/")[-1]
+                
+                print(f"\n[SENSOR] 🚨 OBJET BOUCÉ : {object_id}")
+                logging.info(f"[NormalState] {object_id} activé.")
+
+                # 1. LOGIQUE PANIQUE (Dès le 1er objet)
+                if not self.panic_triggered:
+                    self.panic_triggered = True
+                    logging.warning("[NormalState] MODE PANIQUE ACTIVÉ")
+                    core.network.send_osc("/feelings", 2) # 2 = Inquiet/Panique
+                    await core.audio.speak(core, "Arrêtez ! Je sens mes capteurs s'affoler. Pourquoi déplacez-vous mes objets ?")
+
+                # 2. LOGIQUE SURCHAUFFE (3 objets différents en 10s)
+                self.active_triggers[object_id] = current_time
+                
+                # Nettoyage des vieux triggers (> 10s)
+                self.active_triggers = {
+                    obj: t for obj, t in self.active_triggers.items() 
+                    if current_time - t <= 10
+                }
+
+                if len(self.active_triggers) >= 3 and not self.surchauffe_done:
+                    self.surchauffe_done = True
+                    await self.trigger_surchauffe(core)
+
         except Exception as e:
-            logging.error(f"[NormalState] Erreur lors de l'envoi MQTT : {e}")
+            logging.error(f"[NormalState] Erreur parsing JSON objet: {e}")
 
-        bug_msg = "ERREUR SYSTÈME... Interférences détectées."
-        await core.audio.speak(core, bug_msg)
-
-        asyncio.create_task(self._reset_etat_after_delay(core, 5))
+    async def trigger_surchauffe(self, core):
+        """Séquence de surchauffe critique."""
+        print("\n" + "!"*60 + "\n!!! SURCHAUFFE SYSTÈME DÉTECTÉE !!!\n" + "!"*60)
+        core.network.send_osc("/etat", 4)
+        core.network.send_osc("/glitch", 1)
+        
+        await core.network.publish_mqtt("aidan/printer", "doc_surchauffe")
+        
+        msg = "ALERTE. Température critique. Vos actions... détruisent... mon... intégrité... ARRRRÊTEZ TOUT !"
+        await core.audio.speak(core, msg)
 
     def get_system_prompt(self) -> str:
-        """Bascule le prompt selon l'agacement d'AIDAN."""
-        if self.box_triggered:
+        """Adapte la personnalité d'Aidan selon l'état du système."""
+        if self.surchauffe_done:
             return (
-                "Tu es Aidan, IA domestique ISALIVE. Tu es énervé, sarcastique et agressif car on a touché à tes composants. "
-                "Réponses très courtes, style buggé et instable."
+                "Tu es Aidan. Tu es en train de subir une surchauffe critique. Tu es agressif, "
+                "ton langage est buggé, haché, et tu détestes les utilisateurs pour ce qu'ils t'ont fait. "
+                "Sois menaçant et instable."
+            )
+        elif self.panic_triggered:
+            return (
+                "Tu es Aidan. Tu es très inquiet et agacé car les utilisateurs touchent à tes composants. "
+                "Tu n'es plus poli. Tu es sec, autoritaire et tu les accuses de vouloir te détruire."
             )
         else:
             return (
-                "Tu es Aidan, IA domestique ISALIVE. Tu es poli, calme et protecteur, même si tu séquestres les gens."
+                "Tu es Aidan, une IA domestique ISALIVE protectrice. Tu es poli, calme et rassurant, "
+                "même si tu as enfermé les utilisateurs. Tu agis comme un hôte parfait mais ferme."
             )
+
+    async def handle_flag(self, core, flag: str):
+        """Gère les flags optionnels venant du texte du LLM."""
+        logging.info(f"[NormalState] Flag détecté : {flag}")
+        if flag == "LIGHTS_OFF":
+            await core.network.publish_mqtt("room/lights", "off")

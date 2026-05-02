@@ -6,30 +6,54 @@ from states.normal_state import NormalState
 from states.showroom_state import ShowroomState
 
 class AidanCore:
-    """Liaision entre audio, réseau et logique de states"""
-
-    def __init__(self, config, network_manager, audio_manager,memory_manager):
+    def __init__(self, config, network_manager, audio_manager, memory_manager):
         self.config = config
         self.network = network_manager
         self.audio = audio_manager
         self.memory = memory_manager
         self.current_state = None
-        
-        
-        # Historique global de la conversation à envoyer à LM Studio
-        # self.conversation_history = [] 
+        self.phase_timer_task = None  # Stockage du timer
 
     async def set_state(self, new_state_object):
-        """Changement de phase piloté par Chataigne"""
+        """Changement de phase avec gestion du timer automatique"""
+        # 1. Annulation de l'ancien timer s'il existe
+        if self.phase_timer_task:
+            self.phase_timer_task.cancel()
+            self.phase_timer_task = None
+            logging.info("[Core] Timer automatique annulé.")
+
         if self.current_state:
             await self.current_state.on_exit(self)
             
         self.current_state = new_state_object
-        logging.info(f"[Core] Changing phase from [{self.current_state.__class__.__name__}] to [{new_state_object.__class__.__name__}] ")
+        logging.info(f"[Core] Nouvelle phase : [{new_state_object.__class__.__name__}]")
         
         await self.current_state.on_enter(self)
 
+        # 2. Vérification pour lancer le timer de 5 minutes
+        # On importe localement pour éviter l'erreur circulaire
+        from states.showroom_state import ShowroomState
+        if isinstance(new_state_object, ShowroomState):
+            logging.info("[Core] Showroom détecté : Lancement du timer de 5min.")
+            self.phase_timer_task = asyncio.create_task(self._auto_transition_timer(300))
+
+    async def _auto_transition_timer(self, delay: int):
+        try:
+            await asyncio.sleep(delay)
+            logging.info("[Core] ⏱️ 5 minutes écoulées. Passage automatique à NormalState.")
+            
+            # Import local pour éviter l'erreur circulaire
+            from states.normal_state import NormalState
+            await self.set_state(NormalState())
+        except asyncio.CancelledError:
+            pass # Le timer a été annulé proprement
+
     async def handle_mqtt_message(self, topic, payload):
+        # Imports locaux ici aussi si nécessaire
+        from states.normal_state import NormalState
+        from states.showroom_state import ShowroomState
+        from states.final_state import FinalState
+
         if topic == "regie/phase":
             if payload == "escape":
                 await self.set_state(NormalState())
@@ -37,6 +61,8 @@ class AidanCore:
                 await self.set_state(ShowroomState())
             elif payload == "end":
                 await self.set_state(FinalState())
+
+        
         """
         Routage des messages MQTT entrants depuis la Régie (Chataigne).
         """
@@ -50,9 +76,11 @@ class AidanCore:
         # (Utile si une phase spécifique a besoin de réagir à un capteur IoT)
         elif self.current_state and hasattr(self.current_state, 'handle_mqtt'):
             await self.current_state.handle_mqtt(self, topic, payload)
-    
-    
-            
+
+        if topic.startswith("showroom/"):
+            if self.current_state and hasattr(self.current_state, 'handle_object_move'):
+                await self.current_state.handle_object_move(self, topic, payload)
+          
     async def process_llm_response(self, raw_text: str):
         """Récupération et analyse des flags"""
 

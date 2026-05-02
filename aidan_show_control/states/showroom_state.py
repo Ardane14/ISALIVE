@@ -24,7 +24,9 @@ class ShowroomState(PhaseState):
             logging.error(f"[ShowroomState] Fichier introuvable : {self.hacker_audio_path}")
 
     async def on_enter(self, core):
-        logging.info(f"[ShowroomState] Entrée. Check musique: {self.music_path}")
+        logging.info("[ShowroomState] Entrée dans l'état showroom.")
+        logging.info(f"Check musique: {self.music_path}")
+        await core.network.publish_mqtt("aidan/phase", "showroom")
         
         # Signaux OSC
         core.network.send_osc("/status", "online")

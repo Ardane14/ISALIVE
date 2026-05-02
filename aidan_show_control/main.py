@@ -48,7 +48,7 @@ async def main():
         logging.info("=== MOTEUR EN LIGNE ===")
         
         # 3. On force l'état initial pour notre test
-        await aidan_core.set_state(ShowroomState())
+        await aidan_core.set_state(NormalState())
         
         # 4. On lance la boucle infinie de l'IA (qui remplace notre ancien 'while True')
         await aidan_core.run_audio_loop()

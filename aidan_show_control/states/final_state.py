@@ -24,6 +24,7 @@ class FinalState(PhaseState):
 
     async def on_enter(self, core):
         logging.info("[FinalState] Initialisation. AIDAN est silencieux, en attente...")
+        await core.network.publish_mqtt("aidan/phase", "end")
         self.current_index = 0
         self.score = 0
         self.is_finished = False
