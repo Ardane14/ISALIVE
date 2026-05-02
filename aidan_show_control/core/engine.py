@@ -2,6 +2,8 @@ import asyncio
 import logging
 from utils.text_processing import extract_flags_and_clean
 from states.final_state import FinalState
+from states.normal_state import NormalState
+from states.showroom_state import ShowroomState
 
 class AidanCore:
     """Liaision entre audio, réseau et logique de states"""
@@ -27,7 +29,14 @@ class AidanCore:
         
         await self.current_state.on_enter(self)
 
-    async def handle_mqtt_message(self, topic: str, payload: str):
+    async def handle_mqtt_message(self, topic, payload):
+        if topic == "regie/phase":
+            if payload == "escape":
+                await self.set_state(NormalState())
+            elif payload == "showroom":
+                await self.set_state(ShowroomState())
+            elif payload == "end":
+                await self.set_state(FinalState())
         """
         Routage des messages MQTT entrants depuis la Régie (Chataigne).
         """
@@ -59,7 +68,7 @@ class AidanCore:
         # 3. Envoi du texte propre au synthétiseur vocal (TTS)
         if spoken_text:
             logging.info(f"[Core] TTS Message : {spoken_text}")
-            await self.audio.speak(spoken_text)
+            await self.audio.speak(self, spoken_text)
 
     async def run_audio_loop(self):
         """
@@ -83,7 +92,7 @@ class AidanCore:
                     self.network.send_osc("/etat", 1) 
                     logging.info("[Core] 🟢 Micro ouvert (OSC Envoyé)")
 
-                audio_file = await self.audio.record_ptt(on_start_callback=alerte_micro_ouvert) 
+                audio_file = await self.audio.record_ptt(self) 
                 
                 if not audio_file:
                     self.network.send_osc("/etat", 0)

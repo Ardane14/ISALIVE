@@ -9,8 +9,9 @@ from core.config import ConfigLoader
 from audio.pipeline import AudioManager
 from network.manager import NetworkManager
 from core.engine import AidanCore
-from states.normal_state import NormalState
 from states.showroom_state import ShowroomState
+from states.normal_state import NormalState
+from states.final_state import FinalState
 from memory.manager import MemoryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s", datefmt="%H:%M:%S")
@@ -41,6 +42,8 @@ async def main():
         # Ainsi, quand la régie parle, le cerveau écoute directement.
         watchdog_task = asyncio.create_task(network_manager.watchdog_lmstudio())
         mqtt_task = asyncio.create_task(network_manager.listen_mqtt(on_message_callback=aidan_core.handle_mqtt_message))
+
+        await network_manager.mqtt_ready.wait()
 
         logging.info("=== MOTEUR EN LIGNE ===")
         
