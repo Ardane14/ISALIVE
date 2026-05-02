@@ -18,6 +18,7 @@ class NetworkManager:
 
         self.http_session = None
         self.mqtt_client = None 
+        self.mqtt_ready = asyncio.Event()
         self.osc_client = udp_client.SimpleUDPClient(self.osc_ip, self.osc_port)
         self.lm_is_online = False
 
@@ -54,34 +55,47 @@ class NetworkManager:
         reconnect_interval = 2
         while True:
             try:
-                async with aiomqtt.Client(self.mqtt_broker, port=self.mqtt_port) as client:
+                async with aiomqtt.Client(hostname=self.mqtt_broker, port=self.mqtt_port) as client:
                     logging.info("[MQTT] Connecté au Broker")
                     self.mqtt_client = client 
-                    await client.subscribe("aidan/control/#")
+                    self.mqtt_ready.set()
+                    
+                    # --- CORRECTION ICI : ON S'ABONNE AUX DEUX TOPICS ---
+                    await client.subscribe("regie/phase")
+                    await client.subscribe("showroom/#") # <--- Écoute tous les objets (1, 2, 3...)
+                    logging.info("[MQTT] Abonné à regie/phase et showroom/#")
+                    
                     async for message in client.messages:
                         topic = message.topic.value
                         payload = message.payload.decode('utf-8')
+                        
+                        # Debug pour voir passer les messages dans la console
+                        # logging.info(f"[MQTT IN] {topic} : {payload}")
+                        
                         await on_message_callback(topic, payload)
+
             except aiomqtt.MqttError:
+                logging.warning("[MQTT] Erreur, tentative de reconnexion...")
+                self.mqtt_ready.clear()
                 self.mqtt_client = None
                 await asyncio.sleep(reconnect_interval)
 
-    # --- MÉTHODE BIEN INDENTÉE ---
     async def publish_mqtt(self, topic: str, payload):
         """Publie un message. Gère dict, list et string automatiquement."""
-        if self.mqtt_client is not None:
-            try:
-                if isinstance(payload, (dict, list)):
-                    payload = json.dumps(payload)
-                elif not isinstance(payload, str):
-                    payload = str(payload)
-                
-                await self.mqtt_client.publish(topic, payload=payload, retain=True)
-                logging.info(f"[MQTT OUT] {topic} : {payload}")
-            except Exception as e:
-                logging.error(f"[MQTT] Erreur publication: {e}")
-        else:
-            logging.warning(f"[MQTT] Non connecté, échec sur : {topic}")
+        try:
+            await asyncio.wait_for(self.mqtt_ready.wait(), timeout=5.0) 
+            
+            if isinstance(payload, (dict, list)):
+                payload = json.dumps(payload)
+            elif not isinstance(payload, str):
+                payload = str(payload)
+            
+            await self.mqtt_client.publish(topic, payload=payload, retain=True)
+            logging.info(f"[MQTT OUT] {topic} : {payload}")
+        except asyncio.TimeoutError:
+            logging.error(f"[MQTT] Timeout : impossible de publier sur {topic} (non connecté)")
+        except Exception as e:
+            logging.error(f"[MQTT] Erreur publication: {e}")
 
     async def ask_llm(self, system_prompt: str, user_text: str) -> str:
         if not self.http_session: return ""
